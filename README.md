@@ -29,8 +29,10 @@ https://raw.githubusercontent.com/calbabyjr/director-studio-unraid/main/template
 ## Image
 
 ```text
-ghcr.io/calbabyjr/director-studio:latest
+calbabyjr/director-studio:latest
 ```
+
+Also published as `ghcr.io/calbabyjr/director-studio:latest`.
 
 Host networking is required so `127.0.0.1:8188` and `127.0.0.1:11434` are the Unraid host.
 
@@ -46,7 +48,7 @@ Host networking is required so `127.0.0.1:8188` and `127.0.0.1:11434` are the Un
 
 ```bash
 cd director-studio-unraid
-docker build -t ghcr.io/calbabyjr/director-studio:latest -f docker/Dockerfile .
+docker build -t calbabyjr/director-studio:latest -f docker/Dockerfile .
 ```
 
 ## License

@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Director-Studio</Name>
-  <Repository>ghcr.io/calbabyjr/director-studio:latest</Repository>
-  <Registry>https://ghcr.io/calbabyjr/director-studio</Registry>
+  <Repository>calbabyjr/director-studio:latest</Repository>
+  <Registry>https://hub.docker.com/r/calbabyjr/director-studio</Registry>
   <Network>host</Network>
   <MyIP/>
   <Shell>bash</Shell>
@@ -22,7 +22,7 @@ This container does not include models. Point DS_DIRECTOR_VISION_MODEL at an Oll
   <ReadMe>https://raw.githubusercontent.com/calbabyjr/director-studio-unraid/main/README.md</ReadMe>
   <Icon>https://raw.githubusercontent.com/calbabyjr/director-studio-unraid/main/icon.svg</Icon>
   <Requires>Running ComfyUI (typically port 8188) and Ollama (typically port 11434) on the Unraid host. Host network recommended.</Requires>
-  <Changes>Initial Community Apps template. Image published to ghcr.io/calbabyjr/director-studio.</Changes>
+  <Changes>Image published to Docker Hub as calbabyjr/director-studio:latest.</Changes>
   <Date>2026-09-20</Date>
   <MinVer>6.12</MinVer>
   <License>Apache-2.0</License>
