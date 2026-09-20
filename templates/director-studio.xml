@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Director-Studio</Name>
+  <Repository>ghcr.io/calbabyjr/director-studio:latest</Repository>
+  <Registry>https://ghcr.io/calbabyjr/director-studio</Registry>
+  <Network>host</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/calbabyjr/director-studio-unraid/issues</Support>
+  <Project>https://github.com/calbabyjr/director-studio-unraid</Project>
+  <Overview>Local-first pre-production UI for Unraid. Planning LLM is your existing Ollama container; image and video jobs go to your existing ComfyUI. This container is an orchestrator only and does not need a GPU.</Overview>
+  <Description>Director Studio talks to ComfyUI (default http://127.0.0.1:8188) and Ollama (default http://127.0.0.1:11434) over host networking. Do not switch to bridge unless you also change DS_COMFY_BASE_URL and DS_OLLAMA_BASE_URL.&#13;
+&#13;
+Install ComfyUI and Ollama first. Pick the Director model in the WebUI after start. Set DS_VRAM_POLICY to shared if ComfyUI and Ollama use different GPUs; exclusive if they share one card.&#13;
+&#13;
+This container does not include models. Point DS_DIRECTOR_VISION_MODEL at an Ollama tag that can inspect images if you use Picture review.</Description>
+  <Category>AI: MediaApp:Video Productivity:</Category>
+  <ExtraSearchTerms>comfyui ollama filmmaking h3 minimax director storyboard</ExtraSearchTerms>
+  <WebUI>http://[IP]:[PORT:8790]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/calbabyjr/director-studio-unraid/main/templates/director-studio.xml</TemplateURL>
+  <ReadMe>https://raw.githubusercontent.com/calbabyjr/director-studio-unraid/main/README.md</ReadMe>
+  <Icon>https://raw.githubusercontent.com/calbabyjr/director-studio-unraid/main/icon.svg</Icon>
+  <Requires>Running ComfyUI (typically port 8188) and Ollama (typically port 11434) on the Unraid host. Host network recommended.</Requires>
+  <Changes>Initial Community Apps template. Image published to ghcr.io/calbabyjr/director-studio.</Changes>
+  <Date>2026-09-20</Date>
+  <MinVer>6.12</MinVer>
+  <License>Apache-2.0</License>
+  <ExtraParams>--log-opt max-size=10m --log-opt max-file=3</ExtraParams>
+  <Config Name="WebUI Port" Target="8790" Default="8790" Mode="tcp" Description="Host-network WebUI port. Must match DS_PORT." Type="Port" Display="always" Required="true" Mask="false">8790</Config>
+  <Config Name="App data" Target="/data" Default="/mnt/user/appdata/director-studio" Mode="rw" Description="Projects, library, and jobs." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/director-studio</Config>
+  <Config Name="DS_HOST" Target="DS_HOST" Default="0.0.0.0" Mode="" Description="Listen address. Keep 0.0.0.0 for LAN access." Type="Variable" Display="always" Required="true" Mask="false">0.0.0.0</Config>
+  <Config Name="DS_PORT" Target="DS_PORT" Default="8790" Mode="" Description="Must match the WebUI Port." Type="Variable" Display="always" Required="true" Mask="false">8790</Config>
+  <Config Name="DS_DATA_DIR" Target="DS_DATA_DIR" Default="/data" Mode="" Description="In-container data path." Type="Variable" Display="advanced" Required="true" Mask="false">/data</Config>
+  <Config Name="DS_COMFY_BASE_URL" Target="DS_COMFY_BASE_URL" Default="http://127.0.0.1:8188" Mode="" Description="Existing ComfyUI URL as seen from the Unraid host." Type="Variable" Display="always" Required="true" Mask="false">http://127.0.0.1:8188</Config>
+  <Config Name="DS_OLLAMA_BASE_URL" Target="DS_OLLAMA_BASE_URL" Default="http://127.0.0.1:11434" Mode="" Description="Existing Ollama URL as seen from the Unraid host." Type="Variable" Display="always" Required="true" Mask="false">http://127.0.0.1:11434</Config>
+  <Config Name="DS_LLM_PROVIDER" Target="DS_LLM_PROVIDER" Default="ollama" Mode="" Description="ollama, lm-studio, or openai-compatible." Type="Variable" Display="always" Required="true" Mask="false">ollama</Config>
+  <Config Name="DS_DIRECTOR_VISION_MODEL" Target="DS_DIRECTOR_VISION_MODEL" Default="" Mode="" Description="Optional Ollama tag for Picture inspection. Leave empty to auto-pick a VL model." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="DS_DIRECTOR_NUM_CTX" Target="DS_DIRECTOR_NUM_CTX" Default="32768" Mode="" Description="Ollama context length for Director chat." Type="Variable" Display="advanced" Required="false" Mask="false">32768</Config>
+  <Config Name="DS_DIRECTOR_AGENT_RUNTIME" Target="DS_DIRECTOR_AGENT_RUNTIME" Default="legacy" Mode="" Description="legacy or harness." Type="Variable" Display="always" Required="false" Mask="false">legacy</Config>
+  <Config Name="DS_H3_PROVIDER" Target="DS_H3_PROVIDER" Default="local" Mode="" Description="local = ComfyUI H3. minimax = official MiniMax API." Type="Variable" Display="always" Required="false" Mask="false">local</Config>
+  <Config Name="DS_VRAM_POLICY" Target="DS_VRAM_POLICY" Default="shared" Mode="" Description="shared keeps Comfy and Ollama loaded (use when they are on different GPUs). exclusive unloads the LLM before Comfy jobs." Type="Variable" Display="advanced" Required="false" Mask="false">shared</Config>
+  <Config Name="DS_LLM_KEEP_LOADED" Target="DS_LLM_KEEP_LOADED" Default="true" Mode="" Description="Keep the Director LLM loaded between chat turns." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="DS_H3_MINIMAX_API_KEY" Target="DS_H3_MINIMAX_API_KEY" Default="" Mode="" Description="Optional MiniMax official API key." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="TZ" Target="TZ" Default="America/Los_Angeles" Mode="" Description="Timezone" Type="Variable" Display="advanced" Required="false" Mask="false">UTC</Config>
+</Container>

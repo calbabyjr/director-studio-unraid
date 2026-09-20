@@ -1,0 +1,14 @@
+<CommunityApplications>
+  <Profile>
+Director Studio for Unraid: a local-first pre-production UI that talks to **your existing ComfyUI and Ollama** containers. It does not bundle models or GPUs.
+
+This repository publishes the Docker image `ghcr.io/calbabyjr/director-studio` and the Community Apps template. Application source is based on [ai2764/Director-Studio](https://github.com/ai2764/Director-Studio) plus Unraid packaging and local patches (prop design tools, shared VRAM policy, activity meter).
+
+**Requires:** a running ComfyUI instance (typically `:8188`) and a running Ollama instance (typically `:11434`). Use host networking so `127.0.0.1` inside the container is the Unraid host.
+
+Support: [GitHub Issues](https://github.com/calbabyjr/director-studio-unraid/issues)
+  </Profile>
+  <Icon>https://raw.githubusercontent.com/calbabyjr/director-studio-unraid/main/icon.svg</Icon>
+  <WebPage>https://github.com/calbabyjr/director-studio-unraid</WebPage>
+  <DonateText>Star the repo if this helps your server</DonateText>
+</CommunityApplications>
