@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>ollama</Name>
+  <Repository>ollama/ollama</Repository>
+  <Registry>https://hub.docker.com/r/ollama/ollama/</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <MyMAC/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://hub.docker.com/r/ollama/ollama/</Support>
+  <Project/>
+  <ReadMe/>
+  <Overview>The easiest way to get up and running with large language models locally.</Overview>
+  <Category>AI: Other:</Category>
+  <WebUI>http://[IP]:[PORT:11434]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/Joly0/docker-templates/master/templates/ollama.xml</TemplateURL>
+  <Icon>https://ollama.ai/public/ollama.png</Icon>
+  <ExtraParams>--runtime=nvidia --gpus '"device=GPU-d367c22f-0b56-08a5-fe77-3ef6fe84596b"' --memory=32G</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled>1789863407</DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>**Nvidia Driver plugin** (nVidia Support)</Requires>
+  <Config Name="Config" Target="/root/.ollama" Default="/mnt/user/appdata/ollama" Mode="rw" Description="" Type="Path" Display="always" Required="false" Mask="false">/mnt/ai/appdata-ai/ollama/config</Config>
+  <Config Name="Web Interface" Target="11434" Default="11434" Mode="tcp" Description="" Type="Port" Display="always" Required="false" Mask="false">11434</Config>
+  <Config Name="OLLAMA_ORIGINS" Target="OLLAMA_ORIGINS" Default="" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">*</Config>
+  <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="GPU-d367c22f-0b56-08a5-fe77-3ef6fe84596b" Mode="" Description="5060 Ti only. HauhauCS 9B fits; 4070 stays TTS; 3090 stays ComfyUI." Type="Variable" Display="always" Required="true" Mask="false">GPU-d367c22f-0b56-08a5-fe77-3ef6fe84596b</Config>
+  <Config Name="NVIDIA_DRIVER_CAPABILITIES" Target="NVIDIA_DRIVER_CAPABILITIES" Default="all" Mode="" Description="" Type="Variable" Display="always" Required="true" Mask="false">all</Config>
+  <Config Name="OLLAMA_HOST" Target="OLLAMA_HOST" Default="0.0.0.0" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">0.0.0.0</Config>
+  <Config Name="OLLAMA_KEEP_ALIVE" Target="OLLAMA_KEEP_ALIVE" Default="24h" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">10m</Config>
+  <Config Name="OLLAMA_FLASH_ATTENTION" Target="OLLAMA_FLASH_ATTENTION" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="OLLAMA_CONTEXT_LENGTH" Target="OLLAMA_CONTEXT_LENGTH" Default="16384" Mode="" Description="Default num_ctx when a model loads. Director uses 32768." Type="Variable" Display="always" Required="false" Mask="false">32768</Config>
+  <Config Name="OLLAMA_NUM_PARALLEL" Target="OLLAMA_NUM_PARALLEL" Default="" Mode="" Description="One 32k slot on 16GB. Two slots will OOM or steal the 4070." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
+  <Config Name="OLLAMA_MAX_LOADED_MODELS" Target="OLLAMA_MAX_LOADED_MODELS" Default="" Mode="" Description="Keep a single resident model so Director does not dual-load 9Bs." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
+  <TailscaleStateDir/>
+</Container>

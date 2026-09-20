@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>ComfyUI-Nvidia-Docker</Name>
+  <Repository>mmartial/comfyui-nvidia-docker:ubuntu24_cuda13.2-latest</Repository>
+  <Registry>https://hub.docker.com/r/mmartial/comfyui-nvidia-docker</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <MyMAC/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://forums.unraid.net/topic/172874-support-comfyui-nvidia-docker/</Support>
+  <Project>https://github.com/mmartial/ComfyUI-Nvidia-Docker</Project>
+  <ReadMe/>
+  <Overview>ComfyUI WebUI Dockerfile with Nvidia support, installing ComfyUI from GitHub.&#13;
+Also installs ComfyUI Manager to simplify integration of additional custom nodes.&#13;
+&#13;
+The "run directory" contains HF, ComfyUI and venv.&#13;
+The "basedir" contains input, output and custom_nodes.&#13;
+&#13;
+All those folders will be created with the WANTED_UID and WANTED_GID parameters (by default using Unraid's default of 99:100) allowing the end-user to place directly into the folders their checkpoints, unet, lora and other required models.&#13;
+&#13;
+The container comes with no weights/models; you need to obtain those and install them in the proper directories under the mount you have selected for the "run directory".&#13;
+&#13;
+Output files will be placed into the basedir/output folder within the "basedir" directory.&#13;
+&#13;
+Please see https://github.com/mmartial/ComfyUI-Nvidia-Docker for further details.&#13;
+- See details about "latest" tag&#13;
+- See details about "First time use" (and the "bottle" workflow), noting that Unraid's default YOUR_BASE_DIRECTORY should be /mnt/user/appdata/comfyui-nvidia/basedir&#13;
+- Blackwell users (RTX 50xx) check the README.md for details on how to enable PyTorch 2.7.0 with CUDA 12.8 support: "Blackwell support on Unraid" section&#13;
+&#13;
+Note:&#13;
+- The container requires the Nvidia Driver plugin to be installed on your Unraid server. Usually that plugin will get you access to a CUDA driver with support for the latest tag available for this container.&#13;
+- This is a WebUI for the ComfyUI Stable Diffusion tool with a Docker image of usually over 4GB.&#13;
+- The container will take a while to start up, as it needs to download the ComfyUI Stable Diffusion tool and install its dependencies, usually adding another 5GB of downloaded content in the venv folder&#13;
+- The original Docker image is from Nvidia, as such it is governed by the NVIDIA Deep Learning Container License.&#13;
+- There are multiple version of the base image available, please select the one that fits your needs best. The name of the tag is the Ubuntu version followed by the CUDA version. Latest is set to point to the most recent combination as it should include the most recent software updates. For the complete list of supported versions, please see the GitHub repository</Overview>
+  <Category>AI: MediaApp:Photos</Category>
+  <WebUI>http://[IP]:[PORT:8188]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/mmartial/unraid-templates/main/templates/ComfyUI-Nvidia-Docker.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/mmartial/unraid-templates/main/templates/img/ComfyUI-Nvidia-Docker.png</Icon>
+  <ExtraParams>--runtime=nvidia --memory=64G</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled>1783576179</DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>**Nvidia Driver plugin**</Requires>
+  <Config Name="WebUI Port" Target="8188" Default="8188" Mode="tcp" Description="" Type="Port" Display="always" Required="true" Mask="false">8188</Config>
+  <Config Name="run directory (venv, ComfyUI from git, ...)" Target="/comfy/mnt" Default="/mnt/user/appdata/comfyui-nvidia/mnt" Mode="rw" Description="" Type="Path" Display="always" Required="true" Mask="false">/mnt/appdata-vm/appdata/comfyui-nvidia/mnt</Config>
+  <Config Name="basedir directory (models, input, output, custom_nodes)" Target="/basedir" Default="/mnt/user/appdata/comfyui-nvidia/basedir" Mode="rw" Description="" Type="Path" Display="always" Required="true" Mask="false">/mnt/ai/appdata-ai/comfyui-nvidia/basedir</Config>
+  <Config Name="WANTED_UID" Target="WANTED_UID" Default="99" Mode="" Description="UID to use for content in run directory" Type="Variable" Display="always" Required="true" Mask="false">99</Config>
+  <Config Name="WANTED_GID" Target="WANTED_GID" Default="100" Mode="" Description="GID to use for content in run directory" Type="Variable" Display="always" Required="true" Mask="false">100</Config>
+  <Config Name="COMFY_CMDLINE_EXTRA" Target="COMFY_CMDLINE_EXTRA" Default="" Mode="" Description="Extra command-line options for ComfyUI" Type="Variable" Display="always" Required="false" Mask="false">--fast fp16_accumulation --cache-lru 8 --reserve-vram 1.0</Config>
+  <Config Name="SECURITY_LEVEL" Target="SECURITY_LEVEL" Default="normal" Mode="" Description="Modify the security level for the WebUI, see https://github.com/ltdrdata/ComfyUI-Manager?tab=readme-ov-file#security-policy for authorized values" Type="Variable" Display="always" Required="true" Mask="false">weak</Config>
+  <Config Name="FORCE_CHOWN" Target="FORCE_CHOWN" Default="true" Mode="" Description="Force change directory ownership as the comfy user during script startup (this process might be slow). This option was added to support users who mount the run and basedir folders onto other hosts which might not respect the UID/GID of the comfy user. Enabled by default on Unraid. To disable, set to an empty value." Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="DISABLE_UPGRADES" Target="DISABLE_UPGRADES" Default="false" Mode="" Description="Disable container start upgrades of python pacakges (also disables USE_PIPUPGRADE). All updates must be performed using ComfyUI Manager." Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="USE_PIPUPGRADE" Target="USE_PIPUPGRADE" Default="true" Mode="" Description="new default is to use pip install --upgrade, set to false to use pip install." Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="USE_SOCAT" Target="USE_SOCAT" Default="false" Mode="" Description="Use socat to listen on port 8188 and forward to 127.0.0.1:8181 (ie use an alternate port for Comfy to run)" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="GPU-f79316d7-5653-7aba-4596-02f996aa2e7c" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">GPU-3e682c20-2db2-8d18-e9db-e172b6fd0450</Config>
+  <Config Name="NVIDIA_DRIVER_CAPABILITIES" Target="NVIDIA_DRIVER_CAPABILITIES" Default="all" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">all</Config>
+  <Config Name="OLLAMA_HOST" Target="OLLAMA_HOST" Default="10.0.1.9:11434" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">10.0.1.9:11434</Config>
+  <Config Name="USE_NEW_MANAGER" Target="USE_NEW_MANAGER" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="BASE_DIRECTORY" Target="BASE_DIRECTORY" Default="/basedir" Mode="" Description="Base directory for ComfyUI user directories such as models, input, output and custom_nodes" Type="Variable" Display="advanced" Required="true" Mask="false">/basedir</Config>
+  <Config Name="TailScale Fallback State Directory" Target="CA_TS_FALLBACK_DIR" Default="/comfy/mnt" Mode="{3}" Description="Fallback container directory for tailscale state information - Added By Community Applications" Type="Variable" Display="advanced" Required="{7}" Mask="{8}">/comfy/mnt</Config>
+  <TailscaleStateDir/>
+</Container>

@@ -1,0 +1,13 @@
+data/
+src/.git/
+src/frontend/node_modules/
+**/__pycache__/
+**/.pytest_cache/
+**/*.pyc
+**/.venv/
+*.safetensors
+*.gguf
+.env
+.env.*
+!
+.env.example

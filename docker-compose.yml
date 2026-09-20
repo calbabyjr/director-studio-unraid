@@ -1,0 +1,55 @@
+# Director Studio on Unraid — uses the existing ComfyUI and Ollama containers.
+#
+# UI:  http://TOWER_IP:8790
+# API: http://TOWER_IP:8790/api/health
+#
+# GPU work stays in those host services:
+#   ComfyUI-Nvidia-Docker  :8188  RTX 3090
+#   ollama                 :11434 all three GPUs, exclusive-unload before Comfy jobs
+#
+# Build only. The running container is owned by Unraid dockerMan so it can be
+# edited from Docker -> Director-Studio -> Edit.
+#
+#   docker compose -f /mnt/ai/appdata-ai/director-studio/docker-compose.yml build
+# then restart from the Unraid Docker tab. Do not `compose up` — that tags the
+# container as Compose-managed and hides the Edit button.
+
+name: director-studio
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  director-studio:
+    profiles: ["compose-runtime"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: director-studio:latest
+    container_name: Director-Studio
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TZ: America/Los_Angeles
+      DS_HOST: "0.0.0.0"
+      DS_PORT: "8790"
+      DS_DATA_DIR: /data
+      # Host-networked: these are the already-running Unraid containers.
+      DS_COMFY_BASE_URL: http://127.0.0.1:8188
+      DS_OLLAMA_BASE_URL: http://127.0.0.1:11434
+      DS_LLM_PROVIDER: ollama
+      DS_DIRECTOR_AGENT_RUNTIME: legacy
+      DS_H3_PROVIDER: local
+      DS_VRAM_POLICY: exclusive
+      DS_LLM_KEEP_LOADED: "true"
+    volumes:
+      - /mnt/ai/appdata-ai/director-studio/data:/data
+    logging: *default-logging
+    labels:
+      net.unraid.docker.managed: "dockerman"
+      net.unraid.docker.webui: "http://[IP]:[PORT:8790]"
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/ai2764/Director-Studio/main/frontend/public/favicon.svg"
+      net.unraid.docker.shell: "/bin/bash"

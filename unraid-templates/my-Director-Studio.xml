@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Director-Studio</Name>
+  <Repository>director-studio:latest</Repository>
+  <Registry/>
+  <Network>host</Network>
+  <MyIP/>
+  <MyMAC/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/ai2764/Director-Studio/issues</Support>
+  <Project>https://github.com/ai2764/Director-Studio</Project>
+  <ReadMe>https://github.com/ai2764/Director-Studio/blob/main/README.md</ReadMe>
+  <Overview>Director Studio - local-first pre-production UI. Planning LLM is the existing Ollama container; image/video jobs go to the existing ComfyUI-Nvidia-Docker on the RTX 3090. This container is an orchestrator only and does not need a GPU.&#13;
+&#13;
+WebUI: http://TOWER:8790&#13;
+&#13;
+Uses host networking so 127.0.0.1:8188 (ComfyUI) and 127.0.0.1:11434 (Ollama) are the same sockets already published on Tower. Do not switch this to bridge unless you also change DS_COMFY_BASE_URL and DS_OLLAMA_BASE_URL.&#13;
+&#13;
+ALL APP DATA LIVES ON THE ai SSD: /mnt/ai/appdata-ai/director-studio/data -&gt; /data&#13;
+&#13;
+NOTE: the image is BUILT LOCALLY, not pulled. Force Update will fail because director-studio:latest is not on a registry. To update:&#13;
+  cd /mnt/ai/appdata-ai/director-studio &amp;&amp; docker compose build&#13;
+then restart this container from the Docker tab.&#13;
+&#13;
+NOTE: do not add NVIDIA_VISIBLE_DEVICES here. ComfyUI already owns the 3090 and Ollama can see all three GPUs. Director unloads the Ollama model before a Comfy job (DS_VRAM_POLICY=exclusive).&#13;
+&#13;
+NOTE: pick the Director model in the WebUI, not in this template. Good local choices already on Ollama: qwen3:32b, qwen3.6:latest, qwen3:14b.</Overview>
+  <Category>AI: MediaApp:Video</Category>
+  <WebUI>http://[IP]:[PORT:8790]</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/ai2764/Director-Studio/main/frontend/public/favicon.svg</Icon>
+  <ExtraParams>--log-opt max-size=10m --log-opt max-file=3</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled>1789778508</DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>Build the local image first: cd /mnt/ai/appdata-ai/director-studio &amp;&amp; docker compose build. ComfyUI-Nvidia-Docker and ollama must already be running.</Requires>
+  <Config Name="WebUI Port" Target="8790" Default="8790" Mode="tcp" Description="Host-network WebUI port. Changing this also requires DS_PORT to match." Type="Port" Display="always" Required="true" Mask="false">8790</Config>
+  <Config Name="App data (projects, library, jobs)" Target="/data" Default="/mnt/ai/appdata-ai/director-studio/data" Mode="rw" Description="Durable Director Studio data on the ai SSD." Type="Path" Display="always" Required="true" Mask="false">/mnt/ai/appdata-ai/director-studio/data</Config>
+  <Config Name="Comfy workflows" Target="/app/backend/workflows" Default="/mnt/ai/appdata-ai/director-studio/src/backend/workflows" Mode="rw" Description="API graphs. Tower uses qwen_image_edit_2511_bf16 in place of upstream fp8mixed." Type="Path" Display="always" Required="true" Mask="false">/mnt/ai/appdata-ai/director-studio/src/backend/workflows</Config>
+  <Config Name="DS_HOST" Target="DS_HOST" Default="0.0.0.0" Mode="" Description="Listen address inside the container. Keep 0.0.0.0 so the LAN can open the WebUI." Type="Variable" Display="always" Required="true" Mask="false">0.0.0.0</Config>
+  <Config Name="DS_PORT" Target="DS_PORT" Default="8790" Mode="" Description="Must match the WebUI Port above." Type="Variable" Display="always" Required="true" Mask="false">8790</Config>
+  <Config Name="DS_DATA_DIR" Target="DS_DATA_DIR" Default="/data" Mode="" Description="In-container data path. Leave /data unless you also change the App data mount." Type="Variable" Display="advanced" Required="true" Mask="false">/data</Config>
+  <Config Name="DS_COMFY_BASE_URL" Target="DS_COMFY_BASE_URL" Default="http://127.0.0.1:8188" Mode="" Description="Existing ComfyUI-Nvidia-Docker (RTX 3090). GPU1 is :8190, ComfyUI-3D is :8193." Type="Variable" Display="always" Required="true" Mask="false">http://127.0.0.1:8188</Config>
+  <Config Name="DS_OLLAMA_BASE_URL" Target="DS_OLLAMA_BASE_URL" Default="http://127.0.0.1:11434" Mode="" Description="Existing Ollama container." Type="Variable" Display="always" Required="true" Mask="false">http://127.0.0.1:11434</Config>
+  <Config Name="DS_LLM_PROVIDER" Target="DS_LLM_PROVIDER" Default="ollama" Mode="" Description="ollama, lm-studio, or openai-compatible." Type="Variable" Display="always" Required="true" Mask="false">ollama</Config>
+  <Config Name="DS_DIRECTOR_VISION_MODEL" Target="DS_DIRECTOR_VISION_MODEL" Default="qwen2.5vl:7b" Mode="" Description="Vision model for Picture inspection. HauhauCS 9B is uncensored + native vision." Type="Variable" Display="always" Required="false" Mask="false">hauhau-qwen35-9b:latest</Config>
+  <Config Name="DS_DIRECTOR_NUM_CTX" Target="DS_DIRECTOR_NUM_CTX" Default="8192" Mode="" Description="Ollama context. 32k fits HauhauCS 9B on the 5060 Ti." Type="Variable" Display="advanced" Required="false" Mask="false">32768</Config>
+  <Config Name="Director app code" Target="/app/backend/app" Default="/mnt/ai/appdata-ai/director-studio/src/backend/app" Mode="rw" Description="Live backend so Tower patches apply without rebuilding the image." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/ai/appdata-ai/director-studio/src/backend/app</Config>
+  <Config Name="Director UI" Target="/app/frontend/dist" Default="/mnt/ai/appdata-ai/director-studio/src/frontend/dist" Mode="ro" Description="Built Vite UI. Rebuild with npm run build in src/frontend." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/ai/appdata-ai/director-studio/src/frontend/dist</Config>
+  <Config Name="DS_DIRECTOR_AGENT_RUNTIME" Target="DS_DIRECTOR_AGENT_RUNTIME" Default="legacy" Mode="" Description="legacy (Linux default) or harness." Type="Variable" Display="always" Required="false" Mask="false">legacy</Config>
+  <Config Name="DS_H3_PROVIDER" Target="DS_H3_PROVIDER" Default="local" Mode="" Description="local = ComfyUI H3. minimax = official MiniMax API (needs the API key below)." Type="Variable" Display="always" Required="false" Mask="false">local</Config>
+  <Config Name="DS_VRAM_POLICY" Target="DS_VRAM_POLICY" Default="exclusive" Mode="" Description="exclusive unloads Ollama before Comfy. shared = Ollama on 5060/4070, Comfy on 3090, both stay loaded." Type="Variable" Display="advanced" Required="false" Mask="false">shared</Config>
+  <Config Name="DS_LLM_KEEP_LOADED" Target="DS_LLM_KEEP_LOADED" Default="true" Mode="" Description="Keep the Director LLM loaded between chat turns. Comfy jobs still unload it first." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="DS_H3_MINIMAX_API_KEY" Target="DS_H3_MINIMAX_API_KEY" Default="" Mode="" Description="Optional MiniMax official API key. Leave empty for local ComfyUI H3 only." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="TZ" Target="TZ" Default="America/Los_Angeles" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">America/Los_Angeles</Config>
+  <TailscaleStateDir/>
+</Container>
