@@ -10,7 +10,8 @@ import { fetchHealth } from "../shared/api/client";
 import { ProjectProvider, useProject } from "../shared/project/ProjectContext";
 import { ProjectPicker } from "../shared/project/ProjectPicker";
 import { DirectorStudioMark } from "../shared/components/DirectorStudioMark";
-import { NAV_ITEMS, type DesktopPage } from "./navigation";
+import { NAV_ITEMS, type DesktopPage, type NavId } from "./navigation";
+import { DirectorSetupPage } from "../features/settings/DirectorSetupPage";
 import { WorkflowSettingsPage } from "../features/settings/WorkflowSettingsPage";
 import type { Shot } from "../shared/api/types";
 
@@ -28,12 +29,12 @@ function materialReviewRequest(
 }
 
 function MobileAppShell() {
-  const [page, setPage] = useState<"asset" | "director" | "production">("director");
+  const [page, setPage] = useState<"asset" | "director" | "production" | "director-setup">("director");
   const [directorRequest, setDirectorRequest] = useState<DirectorChatRequest | null>(null);
   const requestSequence = useRef(0);
   const { project } = useProject();
   const jsonProductionMode = project?.mode === "json_production";
-  const activePage = jsonProductionMode ? "production" : page;
+  const activePage = jsonProductionMode && page !== "director-setup" ? "production" : page;
   const reviewMaterials = (shot: Shot, shotNumber: number, message: string) => {
     requestSequence.current += 1;
     setDirectorRequest(materialReviewRequest(shot, shotNumber, requestSequence.current, message));
@@ -55,7 +56,16 @@ function MobileAppShell() {
           </div>
           <details className="mobile-project-menu">
             <summary aria-label="Change project">{project?.name || "Project"}</summary>
-            <div className="mobile-project-popover"><ProjectPicker /></div>
+            <div className="mobile-project-popover">
+              <ProjectPicker />
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setPage("director-setup")}
+              >
+                Director setup
+              </button>
+            </div>
           </details>
         </div>
 
@@ -88,6 +98,9 @@ function MobileAppShell() {
         <ActivityMeter />
       </header>
 
+      <div className="mobile-page mobile-director-setup-page" hidden={activePage !== "director-setup"}>
+        <DirectorSetupPage onClose={() => setPage("director")} />
+      </div>
       <div className="mobile-page mobile-asset-page" hidden={activePage !== "asset"}>
         <MobileAssetWorkspace />
       </div>
@@ -117,7 +130,8 @@ function MobileAppShell() {
 function AppShell() {
   const [page, setPage] = useState<DesktopPage>("director");
   const [settingsVisited, setSettingsVisited] = useState(false);
-  const settingsReturnPage = useRef<Exclude<DesktopPage, "settings">>("director");
+  const [setupVisited, setSetupVisited] = useState(false);
+  const overlayReturnPage = useRef<NavId>("director");
   const [directorRequest, setDirectorRequest] = useState<DirectorChatRequest | null>(null);
   const [jsonProductionToolbarTarget, setJsonProductionToolbarTarget] = useState<HTMLDivElement | null>(null);
   const requestSequence = useRef(0);
@@ -127,13 +141,25 @@ function AppShell() {
   } | null>(null);
   const { project } = useProject();
   const jsonProductionMode = project?.mode === "json_production";
-  const activePage = jsonProductionMode && page !== "settings" ? "production" : page;
-  const openSettings = () => {
-    if (activePage !== "settings") settingsReturnPage.current = activePage;
-    setSettingsVisited(true);
-    setPage("settings");
+  const activePage = jsonProductionMode && page !== "settings" && page !== "director-setup"
+    ? "production"
+    : page;
+  const rememberReturnPage = (next: DesktopPage) => {
+    if (activePage === "assets" || activePage === "director" || activePage === "production") {
+      overlayReturnPage.current = activePage;
+    }
+    setPage(next);
   };
-  const closeSettings = () => setPage(settingsReturnPage.current);
+  const openSettings = () => {
+    setSettingsVisited(true);
+    rememberReturnPage("settings");
+  };
+  const closeSettings = () => setPage(overlayReturnPage.current);
+  const openDirectorSetup = () => {
+    setSetupVisited(true);
+    rememberReturnPage("director-setup");
+  };
+  const closeDirectorSetup = () => setPage(overlayReturnPage.current);
   const reviewMaterials = (shot: Shot, shotNumber: number, message: string) => {
     requestSequence.current += 1;
     setDirectorRequest(materialReviewRequest(shot, shotNumber, requestSequence.current, message));
@@ -197,12 +223,21 @@ function AppShell() {
             <span className="dot" />
             <span className="health-label">ComfyUI</span>
           </div>
+          <button
+            type="button"
+            className="btn secondary topbar-settings"
+            aria-current={activePage === "director-setup" ? "page" : undefined}
+            onClick={openDirectorSetup}
+          >
+            Director setup
+          </button>
           <button type="button" className="btn secondary topbar-settings" aria-current={activePage === "settings" ? "page" : undefined} onClick={openSettings}>Settings</button>
         </div>
         <ActivityMeter />
       </header>
 
       {/* Keep pages mounted so in-flight job UI/polling survives tab switches */}
+      {setupVisited ? <div className={activePage === "director-setup" ? "page-pane active" : "page-pane"} hidden={activePage !== "director-setup"}><DirectorSetupPage onClose={closeDirectorSetup} /></div> : null}
       {settingsVisited ? <div className={activePage === "settings" ? "page-pane active" : "page-pane"} hidden={activePage !== "settings"}><WorkflowSettingsPage active={activePage === "settings"} onClose={closeSettings} /></div> : null}
       <div
         className={activePage === "assets" ? "page-pane active" : "page-pane"}

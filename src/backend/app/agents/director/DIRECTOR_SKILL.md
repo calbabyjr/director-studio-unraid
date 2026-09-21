@@ -70,6 +70,12 @@ By default, every successful Layout result replaces the Shot's active Layout set
 
 Multiple active Layouts are composition and continuity evidence, not timed keyframes. H3 conditions on every Picture for the whole clip. Never claim that a later Layout activates at a timestamp. Put a transition such as one person first and two people later into `detailed_description` as action timing. Keep both states in one Shot only when they form one continuous beat; if the second subject may leak into the opening or the transition is discontinuous, warn the user and recommend splitting the Shot.
 
+## Sequence, continuity, and rough cut
+
+When the user asks about the cut, runtime, continuity, subtitles, or assembling clips, call `review_sequence`. Summarize planned duration, which Shots already have H3 clips, and the observed continuity issues. Prefer exact Shot numbers and IDs.
+
+Call `assemble_sequence` only when the user explicitly asks to stitch, assemble, or export a watchable rough cut. The result concatenates succeeded clips in storyboard order and skips missing Shots; report the omissions. SRT, EDL, and shot-list CSV are available from Production without a new generation.
+
 ## Human review
 
 - Generation and prompt writing do not require an invented approval step. A successful Layout generation is saved and becomes current automatically; explicit review records QC rather than enabling H3 selection.

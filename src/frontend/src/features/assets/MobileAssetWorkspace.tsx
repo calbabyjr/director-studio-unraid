@@ -7,20 +7,24 @@ import { MobileLibraryOverview } from "./MobileLibraryOverview";
 import { AssetImportDialog } from "../library/AssetImportDialog";
 import { useProject } from "../../shared/project/ProjectContext";
 
-type MobileAssetCategory = "library" | Exclude<LibraryKind, "layouts" | "costumes">;
+type MobileAssetCategory = "library" | Exclude<LibraryKind, "layouts">;
 
 const CATEGORIES: { id: MobileAssetCategory; label: string }[] = [
   { id: "library", label: "Library" },
   { id: "actors", label: "Actors" },
   { id: "scenes", label: "Scenes" },
   { id: "props", label: "Props" },
+  { id: "costumes", label: "Costumes" },
   { id: "voices", label: "Voices" },
 ];
+
+const IMPORT_ONLY = new Set<Exclude<MobileAssetCategory, "library">>(["costumes", "voices"]);
 
 const WORKFLOW_COPY: Record<Exclude<MobileAssetCategory, "library">, { singular: string; description: string }> = {
   actors: { singular: "Actor", description: "Build a reusable character identity and reference sheet." },
   scenes: { singular: "Scene", description: "Build a reusable location with consistent viewing angles." },
   props: { singular: "Prop", description: "Turn a story object into a clean reusable reference." },
+  costumes: { singular: "Costume", description: "Import a wardrobe photo the Director can bind as a Shot Picture." },
   voices: { singular: "Voice", description: "Prepare a clean performance sample for casting and H3." },
 };
 
@@ -72,7 +76,7 @@ export function MobileAssetWorkspace() {
             </div>
             <button
               type="button"
-              className={`btn ${workflowCategory === "voices" ? "primary" : "secondary"}`}
+              className={`btn ${IMPORT_ONLY.has(workflowCategory) ? "primary" : "secondary"}`}
               disabled={!projectId}
               onClick={() => setImportKind(workflowCategory)}
             >
@@ -80,14 +84,14 @@ export function MobileAssetWorkspace() {
             </button>
           </section>
 
-          {workflowCategory !== "voices" ? (
+          {IMPORT_ONLY.has(workflowCategory) ? (
+            <p className="mobile-workflow-guidance">Import a clean source; the Director will assign it to Shots.</p>
+          ) : (
             <section className="mobile-workflow-surface">
               {workflowCategory === "actors" ? <CastingPage onOpenLibrary={() => setCategory("library")} /> : null}
               {workflowCategory === "scenes" ? <SetDesignPage onOpenLibrary={() => setCategory("library")} /> : null}
               {workflowCategory === "props" ? <PropsPage onOpenLibrary={() => setCategory("library")} /> : null}
             </section>
-          ) : (
-            <p className="mobile-workflow-guidance">Import a clean source; the Director will assign it to Shots.</p>
           )}
         </div>
         );

@@ -68,6 +68,23 @@ export async function deleteLibraryAsset(
   if (!res.ok) throw new Error(await parseError(res));
 }
 
+export async function recastLibraryAsset(
+  kind: string,
+  assetId: string,
+  targetKind: LibraryKind,
+): Promise<LibraryAsset> {
+  const res = await fetch(
+    `/api/library/${encodeURIComponent(kind)}/${encodeURIComponent(assetId)}/kind`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: targetKind }),
+    },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export async function updateLibraryAsset(
   kind: string,
   assetId: string,

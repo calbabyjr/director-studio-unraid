@@ -15,6 +15,7 @@ GUIDE_IDS = frozenset(
         "visual-qc",
         "h3-prompt-writing",
         "video-qc",
+        "sequence-assembly",
     }
 )
 

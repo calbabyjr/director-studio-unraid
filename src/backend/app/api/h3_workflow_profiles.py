@@ -26,6 +26,7 @@ from ..workflow_profiles.h3 import (
     ResolvedH3Profile,
 )
 from ..workflow_profiles.h3.inspector import MAX_WORKFLOW_BYTES, inspect_h3_workflow
+from ..workflow_profiles.h3.ui_to_api import UiWorkflowError, normalize_comfy_workflow
 from ..workflow_profiles.h3.validator import validate_h3_contract
 
 router = APIRouter(prefix="/workflow-profiles/h3", tags=["h3-workflow-profiles"])
@@ -208,7 +209,9 @@ async def import_h3_workflow(
     if not isinstance(graph, dict):
         return _error(400, "invalid_workflow_json", "Workflow JSON must be an object")
     try:
-        analysis = inspect_h3_workflow(graph)
+        object_info = await _object_info_or_none()
+        graph = normalize_comfy_workflow(graph, object_info=object_info)
+        analysis = inspect_h3_workflow(graph, object_info=object_info)
         structural_issues = [
             issue
             for issue in analysis.issues
@@ -224,7 +227,7 @@ async def import_h3_workflow(
             return _error(
                 400,
                 "invalid_workflow",
-                "Workflow must be a valid API graph",
+                "Workflow must be a valid ComfyUI API graph",
                 {
                     "issues": [
                         issue.model_dump(mode="json") for issue in structural_issues
@@ -238,6 +241,8 @@ async def import_h3_workflow(
         display_name = filename.removesuffix(".api")
         import_id = store.create_import(graph, display_name=display_name)
         workflow_sha256 = store.import_workflow_sha256(import_id)
+    except UiWorkflowError as exc:
+        return _error(400, "invalid_workflow", str(exc))
     except (TypeError, ValueError) as exc:
         return _error(400, "invalid_workflow", str(exc))
     except ProfileStorageError as exc:

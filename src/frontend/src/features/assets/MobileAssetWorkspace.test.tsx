@@ -22,6 +22,7 @@ vi.mock("../library/LibraryPage", () => ({
 }));
 vi.mock("../library/api", () => ({
   importExternalAsset: vi.fn(),
+  recastLibraryAsset: vi.fn(),
   listLibraryAssets: vi.fn(async (kind: string) => kind === "actors" ? [{
     id: "actor_1", kind: "actors", name: "Mara", notes: "Lead", pipeline_id: "external",
     job_id: "", seed: null, created_at: "2026-01-01", files: {}, meta: {},
@@ -46,11 +47,10 @@ describe("MobileAssetWorkspace", () => {
   it("opens on a cross-category Library overview", async () => {
     render(<MobileAssetWorkspace />);
 
-    for (const category of ["Library", "Actors", "Scenes", "Props", "Voices"]) {
+    for (const category of ["Library", "Actors", "Scenes", "Props", "Costumes", "Voices"]) {
       expect(screen.getByRole("button", { name: category })).toBeTruthy();
     }
-    expect(screen.queryByRole("button", { name: "Costumes" })).toBeNull();
-    expect(screen.queryByText("No wardrobe prepared")).toBeNull();
+    expect(screen.getByText("No wardrobe prepared")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Layouts" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Project library" })).toBeTruthy();
     await waitFor(() => expect(screen.getByText("Mara")).toBeTruthy());
@@ -69,6 +69,11 @@ describe("MobileAssetWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Voices" }));
     expect(screen.getByRole("heading", { name: "Voice workflow" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Import voice" })).toBeTruthy();
+    expect(screen.queryByTestId("mobile-library")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Costumes" }));
+    expect(screen.getByRole("heading", { name: "Costume workflow" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Import costume" })).toBeTruthy();
     expect(screen.queryByTestId("mobile-library")).toBeNull();
   });
 

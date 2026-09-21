@@ -27,6 +27,7 @@ import {
 } from "./api";
 import { listLibraryAssets, type LibraryAsset } from "../library/api";
 import { ShotMaterialEditor } from "../director/ShotMaterialEditor";
+import { SequencePanel } from "./SequencePanel";
 import { fetchH3Profiles } from "../../shared/api/client";
 import type { H3ActiveProfile } from "../../shared/api/types";
 
@@ -607,6 +608,16 @@ export function ProductionPage({
 
         {error ? <div className="banner error mobile-production-error">{error}</div> : null}
 
+        <SequencePanel
+          projectId={projectId}
+          active={active}
+          mobile
+          onSelectShot={(shotId) => {
+            setSelectedId(shotId);
+            setMaterialEditorOpen(false);
+          }}
+        />
+
         {!projectId ? (
           <p className="mobile-production-empty">Select a project to review its shots.</p>
         ) : projectLoading ? (
@@ -779,7 +790,7 @@ export function ProductionPage({
       subtitle={
         projectId ? (
           <>
-            Shot list → layout / refs / prompt → Submit H3. No separate approve step.
+            Shot list → layout / refs / prompt → Submit H3. Assemble a rough cut when clips are ready.
           </>
         ) : (
           "Select a project in the header."
@@ -789,6 +800,12 @@ export function ProductionPage({
     >
       <ProductionWorkflowProfile profile={workflowProfile} error={workflowProfileError} job={h3Job} />
       {error ? <div className="banner error">{error}</div> : null}
+
+      <SequencePanel
+        projectId={projectId}
+        active={active}
+        onSelectShot={setSelectedId}
+      />
 
       <div className="split-layout production-split">
         <aside className="split-side">

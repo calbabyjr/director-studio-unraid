@@ -59,19 +59,39 @@ function phaseLabel(job: GenerationJobStatus): string {
   return job.kind === "video" ? "Generating video" : "Generating image";
 }
 
+export function jobPipelineLabel(job: GenerationJobStatus): string {
+  const names: Record<string, string> = {
+    h3_ref2va: "H3 video",
+    ref_frame: "Layout",
+    first_frame: "Layout",
+    actor: "Actor",
+    prop: "Prop",
+    scene: "Scene",
+  };
+  return names[job.pipeline_id] || (job.kind === "video" ? "Video" : "Image");
+}
+
+export function sortedGenerationJobs(status: DirectorVramStatus): GenerationJobStatus[] {
+  return [...(status.generation_jobs || [])].sort(
+    (left, right) => Date.parse(left.queued_at) - Date.parse(right.queued_at),
+  );
+}
+
+export function jobActivityLine(job: GenerationJobStatus, now: Date): string {
+  return `${phaseLabel(job)} · ${jobPipelineLabel(job)} · ${formatGenerationElapsed(job.queued_at, now)}`;
+}
+
 export function generationStatusText(
   status: DirectorVramStatus,
   now: Date,
 ): string {
-  const jobs = [...status.generation_jobs].sort(
-    (left, right) => Date.parse(left.queued_at) - Date.parse(right.queued_at),
-  );
+  const jobs = sortedGenerationJobs(status);
   const active = jobs[0];
-  if (!status.chat_locked || !active) return "";
+  if (!active) return "";
   const elapsed = formatGenerationElapsed(active.queued_at, now);
-  const waiting = Math.max(0, status.generation_count - 1);
+  const waiting = Math.max(0, jobs.length - 1);
   const suffix = waiting > 0 ? ` · ${waiting} ${waiting === 1 ? "job" : "jobs"} waiting` : "";
-  return `${phaseLabel(active)} · ${elapsed}${suffix}`;
+  return `${phaseLabel(active)} · ${jobPipelineLabel(active)} · ${elapsed}${suffix}`;
 }
 
 export type ActivityKind = "idle" | "resident" | "llm" | "comfy";
@@ -79,6 +99,8 @@ export type ActivityKind = "idle" | "resident" | "llm" | "comfy";
 export interface ActivityMeterState {
   kind: ActivityKind;
   label: string;
+  jobs?: string[];
+  count?: number;
 }
 
 function shortModel(name: string): string {
@@ -96,9 +118,17 @@ export function activityMeter(status: DirectorVramStatus | null, now: Date): Act
     return { kind: "idle", label: "Activity · connecting to Director…" };
   }
 
-  const generation = generationStatusText(status, now);
-  if (generation) {
-    return { kind: "comfy", label: `ComfyUI · ${generation}` };
+  const jobs = sortedGenerationJobs(status);
+  if (jobs.length) {
+    const lines = jobs.map((job) => jobActivityLine(job, now));
+    const waiting = Math.max(0, jobs.length - 1);
+    const suffix = waiting > 0 ? ` · ${waiting} ${waiting === 1 ? "job" : "jobs"} waiting` : "";
+    return {
+      kind: "comfy",
+      label: `ComfyUI · ${lines[0]}${suffix}`,
+      jobs: lines,
+      count: jobs.length,
+    };
   }
 
   const residents = (status.ollama_ps || []).filter((item) => Number(item.size_vram || 0) > 0);

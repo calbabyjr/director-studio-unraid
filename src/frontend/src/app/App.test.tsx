@@ -44,6 +44,17 @@ vi.mock("../features/settings/WorkflowSettingsPage", () => ({
     </div>
   ),
 }));
+vi.mock("../features/settings/DirectorSetupPage", () => ({
+  DirectorSetupPage: ({ onClose }: { onClose?: () => void }) => (
+    <div>
+      <h1>Director setup</h1>
+      <button type="button" aria-label="Close Director setup" onClick={onClose}>×</button>
+    </div>
+  ),
+}));
+vi.mock("../features/director/ActivityMeter", () => ({
+  ActivityMeter: () => <div data-testid="activity-meter" />,
+}));
 
 vi.mock("../shared/api/client", () => ({
   fetchHealth: vi.fn().mockResolvedValue({
@@ -169,6 +180,17 @@ describe("App mode routing", () => {
 
     expect(screen.getByRole("button", { name: "Assets" }).getAttribute("aria-current")).toBe("page");
     expect(screen.queryByRole("heading", { name: "Workflow settings" })).toBeNull();
+  });
+
+  it("opens Director setup outside the project workflow and without requiring a project", async () => {
+    projectState.project = null;
+    render(<App />);
+    const setup = screen.getByRole("button", { name: "Director setup" });
+    expect(screen.getByRole("navigation", { name: "Project workflow" }).contains(setup)).toBe(false);
+    fireEvent.click(setup);
+    expect(await screen.findByRole("heading", { name: "Director setup" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close Director setup" }));
+    expect(screen.queryByRole("heading", { name: "Director setup" })).toBeNull();
   });
 
   it("does not expose workflow setup in the mobile shell", () => {

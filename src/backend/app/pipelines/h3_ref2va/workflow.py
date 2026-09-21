@@ -19,6 +19,10 @@ from ...workflow_profiles.h3 import (
     ResolvedH3Profile,
     resolve_active_h3_profile,
 )
+from ...workflow_profiles.h3.ui_to_api import (
+    SAGE_PATCH_CLASSES,
+    bypass_model_passthrough_nodes,
+)
 
 H3_REF_NODE = "MiniMaxH3ReferenceToVideo"
 H3_I2V_NODE = "MiniMaxH3ImageToVideo"
@@ -260,6 +264,7 @@ def fill_profile_graph(
 
     if seed is not None and binding.seed_node_id and binding.seed_input:
         filled[binding.seed_node_id].setdefault("inputs", {})[binding.seed_input] = seed
+    bypass_model_passthrough_nodes(filled, SAGE_PATCH_CLASSES)
     if profile.source == "custom":
         _bypass_native_audio_locks(filled, h3_node_id=binding.h3_node_id)
     if profile.source == "builtin" and job_params.get("output_prefix"):

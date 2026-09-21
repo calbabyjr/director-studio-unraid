@@ -54,6 +54,7 @@ from .tool_handlers.layout import handle_layout_tool
 from .tool_handlers.library import handle_library_tool
 from .tool_handlers.media import handle_media_tool
 from .tool_handlers.casting import handle_casting_tool
+from .tool_handlers.memory import handle_memory_tool
 from .tool_handlers.project import handle_project_tool
 
 logger = logging.getLogger("director_studio.director.tool_execution")
@@ -147,6 +148,15 @@ async def execute_tools(
                     result_payloads.append({"ok": True, "observation": observation})
                 actions.append(f"inspect_asset:{args['asset_id']}:{args['file_key']}")
                 notes.append(f"Inspected {args['asset_id']}/{args['file_key']}: {observation['description']}")
+                continue
+            if await handle_memory_tool(
+                name=name,
+                args=args,
+                project_id=project_id,
+                actions=actions,
+                notes=notes,
+                result_payloads=result_payloads,
+            ):
                 continue
             if await handle_library_tool(
                 name=name,

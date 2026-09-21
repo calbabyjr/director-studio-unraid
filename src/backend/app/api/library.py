@@ -15,10 +15,11 @@ from ..core.library.store import (
     delete_asset,
     list_assets,
     load_asset,
+    recast_asset_kind,
     write_asset,
 )
 from ..core.projects.store import list_projects, list_shots, save_shot
-from ..core.projects.layouts import sync_selected_layout_refs
+from ..core.projects.layouts import RefRole, sync_selected_layout_refs
 from ..core.schemas import LibraryAsset
 
 router = APIRouter(tags=["library"])
@@ -44,6 +45,10 @@ class BulkAssignBody(BaseModel):
 class UpdateLibraryMetadataBody(BaseModel):
     name: str | None = None
     notes: str | None = None
+
+
+class RecastKindBody(BaseModel):
+    kind: str = Field(..., description="Target library kind, e.g. costumes")
 
 
 def _detach_layout_asset(asset_id: str) -> int:
@@ -233,6 +238,84 @@ async def get_library_asset(kind: str, asset_id: str) -> LibraryAsset:
     if asset is None:
         raise HTTPException(404, "not found")
     return asset
+
+
+@router.post("/library/{kind}/{asset_id}/kind", response_model=LibraryAsset)
+async def recast_library_asset(kind: str, asset_id: str, body: RecastKindBody) -> LibraryAsset:
+    if kind not in KINDS:
+        raise HTTPException(400, f"unknown kind: {kind}")
+    target = (body.kind or "").strip().lower()
+    if target not in KINDS:
+        raise HTTPException(400, f"unknown kind: {target}")
+    try:
+        updated = recast_asset_kind(kind, asset_id, target)
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message else 400
+        raise HTTPException(status, message) from e
+    _retarget_shots_after_recast(asset_id, kind, target, updated.project_id)
+    _invalidate_shots_using_asset(updated)
+    return updated
+
+
+_KIND_ROLE = {
+    "props": RefRole.prop,
+    "costumes": RefRole.costume,
+    "actors": RefRole.actor,
+    "scenes": RefRole.scene,
+}
+
+
+def _retarget_shots_after_recast(
+    asset_id: str,
+    source_kind: str,
+    target_kind: str,
+    project_id: str | None,
+) -> int:
+    old_role = _KIND_ROLE.get(source_kind)
+    new_role = _KIND_ROLE.get(target_kind)
+    if old_role is None or new_role is None or old_role == new_role:
+        return 0
+    affected = 0
+    for project in list_projects():
+        if project_id and project.id != project_id:
+            continue
+        for shot in list_shots(project.id):
+            changed = False
+            new_refs = []
+            for ref in shot.refs:
+                if ref.asset_id == asset_id and ref.role == old_role:
+                    new_refs.append(ref.model_copy(update={"role": new_role}))
+                    changed = True
+                else:
+                    new_refs.append(ref)
+            new_layouts = []
+            for layout in shot.layout_refs:
+                sources = []
+                layout_changed = False
+                for source in layout.source_refs:
+                    if source.asset_id == asset_id and source.role == old_role:
+                        sources.append(source.model_copy(update={"role": new_role}))
+                        layout_changed = True
+                    else:
+                        sources.append(source)
+                if layout_changed:
+                    new_layouts.append(layout.model_copy(update={"source_refs": sources}))
+                    changed = True
+                else:
+                    new_layouts.append(layout)
+            if not changed:
+                continue
+            meta = dict(shot.meta or {})
+            meta["prompt_picture_signature"] = ""
+            meta["material_review_pending"] = True
+            save_shot(shot.model_copy(update={
+                "refs": new_refs,
+                "layout_refs": new_layouts,
+                "meta": meta,
+            }))
+            affected += 1
+    return affected
 
 
 def _invalidate_shots_using_asset(asset: LibraryAsset) -> None:

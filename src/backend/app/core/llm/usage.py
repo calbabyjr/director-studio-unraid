@@ -80,7 +80,8 @@ class ChatUsageReporter:
             raise
         except Exception as exc:
             overflow = re.search(
-                r"context[_ -]+(?:length|window).*(?:exceed|overflow|limit)|(?:exceed|maximum).*context[_ -]+(?:length|window)",
+                r"context[_ -]+(?:length|window)|prompt.{0,40}too (?:long|large)|"
+                r"exceeds? (?:the )?(?:context|maximum)|n_ctx|num_ctx",
                 str(exc), re.I,
             )
             await emit(status="context_overflow" if overflow else "failed")

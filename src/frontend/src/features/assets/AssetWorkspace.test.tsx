@@ -26,6 +26,7 @@ vi.mock("../props/PropsPage", () => ({
 }));
 vi.mock("../library/api", () => ({
   importExternalAsset: vi.fn(),
+  recastLibraryAsset: vi.fn(),
   listLibraryAssets: vi.fn(async (kind: string) => kind === "actors" ? [{
     id: "actor_1", kind: "actors", name: "Mara", notes: "Lead", pipeline_id: "external",
     job_id: "", seed: null, created_at: "2026-01-01", files: {}, meta: {},
@@ -46,8 +47,8 @@ describe("AssetWorkspace", () => {
     expect(screen.queryByText("Step 01 · Prepare the visual language")).toBeNull();
     expect(screen.getByRole("button", { name: "Library" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Actors" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Costumes" })).toBeNull();
-    expect(screen.queryByText("No wardrobe prepared")).toBeNull();
+    expect(screen.getByRole("button", { name: "Costumes" })).toBeTruthy();
+    expect(screen.getByText("No wardrobe prepared")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Scenes" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Props" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Voices" })).toBeTruthy();
@@ -118,5 +119,18 @@ describe("AssetWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Actors" }));
 
     expect((screen.getByRole("textbox", { name: "Actor draft" }) as HTMLInputElement).value).toBe("Mia close-up reference");
+  });
+
+  it("treats Costumes as an import-only Assets category", () => {
+    state.project = {
+      id: "prj_1", name: "Film", script_text: "", mode: "director",
+      created_at: "2026-01-01", updated_at: "2026-01-01", shot_ids: [],
+    };
+    render(<AssetWorkspace />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Costumes" }));
+    expect(screen.getByRole("heading", { name: "Import a clean wardrobe reference" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Import costume" }));
+    expect(screen.getByRole("dialog", { name: "Import Costumes" })).toBeTruthy();
   });
 });

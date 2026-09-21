@@ -21,6 +21,7 @@ from .layouts import (
     layout_prompt_signature,
     legacy_review_to_layout,
     mirror_legacy_layout_fields,
+    resolve_layout_reference,
     selected_layout_prompt_context,
     sync_selected_layout_refs,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "layout_review_to_legacy",
     "layout_prompt_signature",
     "mirror_legacy_layout_fields",
+    "resolve_layout_reference",
     "selected_layout_prompt_context",
     "sync_selected_layout_refs",
     "JsonPictureRole",

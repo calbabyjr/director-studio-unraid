@@ -8,6 +8,7 @@ import { useProject } from "../../shared/project/ProjectContext";
 import { ShotWorkspace } from "./ShotWorkspace";
 import { ContextUsagePanel } from "./ContextUsage";
 import { ContextCompaction } from "./ContextCompaction";
+import { MemoryNotes } from "./MemoryNotes";
 import { MobileShotDrawer } from "./MobileShotDrawer";
 import {
   cancelDirectorChatSession,
@@ -18,7 +19,10 @@ import {
   getDirectorModel,
   getDirectorVramStatus,
   getProject,
+  listDirectorSouls,
   setDirectorModel,
+  updateProject,
+  type DirectorSoul,
   type ChatMessage,
   type ContextUsage,
   type DirectorChatSessionStatus,
@@ -180,7 +184,7 @@ function DirectorAgentWorkspace({
   mobile: boolean;
   requestedMessage: DirectorChatRequest | null;
 }) {
-  const { projectId, refreshProjects, createAndSelect } = useProject();
+  const { project, projectId, refreshProjects, createAndSelect } = useProject();
   const [shots, setShots] = useState<Shot[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -204,6 +208,8 @@ function DirectorAgentWorkspace({
   const [llmProvider, setLlmProvider] = useState("LLM provider");
   const [llmReachable, setLlmReachable] = useState(false);
   const [llmBusy, setLlmBusy] = useState(false);
+  const [souls, setSouls] = useState<DirectorSoul[]>([]);
+  const [soulBusy, setSoulBusy] = useState(false);
   const [chatSession, setChatSession] = useState<DirectorChatSessionStatus>(IDLE_CHAT_SESSION);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
@@ -276,6 +282,23 @@ function DirectorAgentWorkspace({
       setLlmOptions([]);
     }
   }, []);
+
+  useEffect(() => {
+    void listDirectorSouls().then(setSouls).catch(() => setSouls([]));
+  }, []);
+
+  const onChangeSoul = async (soulId: string) => {
+    if (!projectId || soulBusy) return;
+    setSoulBusy(true);
+    try {
+      await updateProject(projectId, { soul_id: soulId });
+      await refreshProjects();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSoulBusy(false);
+    }
+  };
 
   useEffect(() => {
     void loadLlmModels();
@@ -715,6 +738,20 @@ function DirectorAgentWorkspace({
             </div>
             <div className="director-runtime-controls">
               <label className="director-model-picker inline-model-picker">
+                <span className="muted tiny">Soul</span>
+                <select
+                  aria-label="Director soul"
+                  value={project?.soul_id || souls[0]?.id || "studio"}
+                  disabled={chatDisabled || soulBusy || souls.length === 0}
+                  onChange={(event) => void onChangeSoul(event.target.value)}
+                  title="Directing persona for this project"
+                >
+                  {souls.map((soul) => (
+                    <option key={soul.id} value={soul.id}>{soul.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="director-model-picker inline-model-picker">
                 <span className="muted tiny">LLM</span>
                 <select
                   value={llmOptions.length ? llmModel : ""}
@@ -746,6 +783,7 @@ function DirectorAgentWorkspace({
             </div>
           </div>
         </div>
+        {projectId ? <MemoryNotes projectId={projectId} disabled={busy || generationLocked || chatActive} /> : null}
 
         {mobile && !chatOnly ? (
           <MobileShotDrawer shots={shots} onOpenImage={setLightbox} />
@@ -755,7 +793,7 @@ function DirectorAgentWorkspace({
         {pollError ? <div className="banner error" role="alert" aria-live="polite">{pollError}</div> : null}
         {vramPollError ? <div className="banner error" role="alert" aria-live="polite">{vramPollError}</div> : null}
 
-        {generationLocked && vramStatus ? (
+        {vramStatus && generationStatusText(vramStatus, clockNow) ? (
           <div className="director-generation-status" role="status" aria-live="polite">
             <span className="director-generation-dot" aria-hidden="true" />
             <span>{generationStatusText(vramStatus, clockNow)}</span>

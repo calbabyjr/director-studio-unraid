@@ -14,6 +14,7 @@ from ....core.projects.layouts import (
     LayoutReviewStatus,
     LayoutSourceRef,
     mirror_legacy_layout_fields,
+    resolve_layout_reference,
     sync_selected_layout_refs,
 )
 from ....core.projects.models import Shot, ShotStatus
@@ -112,15 +113,10 @@ async def handle_layout_tool(
 
         layout_ref_id = str(args.get("layout_ref_id") or "").strip()
         feedback = str(args.get("feedback") or "").strip()
-        target = next(
-            (layout for layout in shot.layout_refs if layout.id == layout_ref_id),
-            None,
-        )
-        if target is None:
-            raise ValueError(f"LayoutReference not found: {layout_ref_id}")
+        target = resolve_layout_reference(shot, layout_ref_id)
         if not target.asset_id:
             raise ValueError(
-                f"LayoutReference has no generated image to accept: {layout_ref_id}"
+                f"LayoutReference has no generated image to accept: {target.id}"
             )
 
         accepted = review_layout_reference(
@@ -201,15 +197,10 @@ async def handle_layout_tool(
 
         layout_ref_id = str(args.get("layout_ref_id") or "").strip()
         feedback = str(args.get("feedback") or "").strip()
-        target = next(
-            (layout for layout in shot.layout_refs if layout.id == layout_ref_id),
-            None,
-        )
-        if target is None:
-            raise ValueError(f"LayoutReference not found: {layout_ref_id}")
+        target = resolve_layout_reference(shot, layout_ref_id)
         if not target.asset_id:
             raise ValueError(
-                f"LayoutReference has no generated image to revise: {layout_ref_id}"
+                f"LayoutReference has no generated image to revise: {target.id}"
             )
         if not feedback:
             raise ValueError("dialogue feedback is required")

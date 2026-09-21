@@ -7,7 +7,7 @@ import { SetDesignPage } from "../set/SetDesignPage";
 import { LibraryOverview } from "./LibraryOverview";
 import { AssetImportDialog } from "../library/AssetImportDialog";
 
-type PreparedAssetCategory = Exclude<LibraryKind, "layouts" | "costumes">;
+type PreparedAssetCategory = Exclude<LibraryKind, "layouts">;
 type AssetCategory = "library" | PreparedAssetCategory;
 
 const CATEGORIES: { id: AssetCategory; label: string; eyebrow: string }[] = [
@@ -15,6 +15,7 @@ const CATEGORIES: { id: AssetCategory; label: string; eyebrow: string }[] = [
   { id: "actors", label: "Actors", eyebrow: "Cast identity" },
   { id: "scenes", label: "Scenes", eyebrow: "World and locations" },
   { id: "props", label: "Props", eyebrow: "Story objects" },
+  { id: "costumes", label: "Costumes", eyebrow: "Wardrobe reference" },
   { id: "voices", label: "Voices", eyebrow: "Performance reference" },
 ];
 
@@ -22,7 +23,23 @@ const IMPORT_LABELS: Record<PreparedAssetCategory, string> = {
   actors: "actor",
   scenes: "scene",
   props: "prop",
+  costumes: "costume",
   voices: "voice",
+};
+
+const IMPORT_ONLY = new Set<PreparedAssetCategory>(["costumes", "voices"]);
+
+const IMPORT_ONLY_COPY: Record<"costumes" | "voices", { kicker: string; title: string; body: string }> = {
+  costumes: {
+    kicker: "Costume preparation",
+    title: "Import a clean wardrobe reference",
+    body: "A front or three-view costume photo gives the Director a Picture it can bind as wardrobe on any Shot.",
+  },
+  voices: {
+    kicker: "Voice preparation",
+    title: "Import a clean performance sample",
+    body: "Two to fifteen seconds with a clear speaker name gives the Director a reliable casting reference.",
+  },
 };
 
 export function AssetWorkspace() {
@@ -36,7 +53,7 @@ export function AssetWorkspace() {
         <div>
           <h1>Assets</h1>
           <p>
-            Build the reusable cast, locations, objects, and voices the Director can
+            Build the reusable cast, locations, objects, wardrobe, and voices the Director can
             assign across every Shot.
           </p>
         </div>
@@ -77,7 +94,7 @@ export function AssetWorkspace() {
                 <span>Already have a reference?</span>
                 <button
                   type="button"
-                  className={`btn ${workflowCategory === "voices" ? "primary" : "secondary"}`}
+                  className={`btn ${IMPORT_ONLY.has(workflowCategory) ? "primary" : "secondary"}`}
                   disabled={!projectId}
                   onClick={() => setImportKind(workflowCategory)}
                 >
@@ -87,11 +104,11 @@ export function AssetWorkspace() {
               {workflowCategory === "actors" ? <CastingPage onOpenLibrary={() => setCategory("library")} /> : null}
               {workflowCategory === "scenes" ? <SetDesignPage onOpenLibrary={() => setCategory("library")} /> : null}
               {workflowCategory === "props" ? <PropsPage onOpenLibrary={() => setCategory("library")} /> : null}
-              {workflowCategory === "voices" ? (
+              {workflowCategory === "costumes" || workflowCategory === "voices" ? (
                 <div className="asset-guidance-card">
-                  <div className="workspace-kicker">Voice preparation</div>
-                  <h2>Import a clean performance sample</h2>
-                  <p>Two to fifteen seconds with a clear speaker name gives the Director a reliable casting reference.</p>
+                  <div className="workspace-kicker">{IMPORT_ONLY_COPY[workflowCategory].kicker}</div>
+                  <h2>{IMPORT_ONLY_COPY[workflowCategory].title}</h2>
+                  <p>{IMPORT_ONLY_COPY[workflowCategory].body}</p>
                 </div>
               ) : null}
             </div>

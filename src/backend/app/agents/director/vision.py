@@ -158,12 +158,17 @@ def layout_reference_ids_from_message(
     found: list[str] = []
     for shot in shots:
         for layout in shot.layout_refs:
-            pattern = (
-                rf"(?<![A-Za-z0-9_-]){re.escape(layout.id)}"
-                rf"(?![A-Za-z0-9_-])"
-            )
-            if re.search(pattern, raw, flags=re.I):
-                found.append(layout.id)
+            ids = [layout.id]
+            if layout.asset_id:
+                ids.append(layout.asset_id)
+            for token in ids:
+                pattern = (
+                    rf"(?<![A-Za-z0-9_-]){re.escape(token)}"
+                    rf"(?![A-Za-z0-9_-])"
+                )
+                if re.search(pattern, raw, flags=re.I):
+                    found.append(layout.id)
+                    break
     return list(dict.fromkeys(found))
 
 

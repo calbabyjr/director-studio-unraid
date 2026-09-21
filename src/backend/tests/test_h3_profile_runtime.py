@@ -242,6 +242,42 @@ def test_custom_profile_without_audio_bypasses_native_audio_lock() -> None:
     assert "audio" not in filled["130"]["inputs"]
 
 
+def test_custom_profile_bypasses_missing_sageattention_patch() -> None:
+    graph = {
+        "136": {
+            "class_type": "MiniMaxH3ReferenceToVideo",
+            "inputs": {
+                "prompt": "old",
+                "width": 864,
+                "height": 480,
+                "length": 56,
+            },
+        },
+        "192": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": "h3.safetensors"},
+        },
+        "58": {
+            "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+            "inputs": {"model": ["192", 0]},
+        },
+        "53": {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {"model": ["58", 0], "lora_name": "turbo.safetensors"},
+        },
+        "129": {"class_type": "RandomNoise", "inputs": {"noise_seed": 1}},
+        "92": {"class_type": "SaveVideo", "inputs": {}},
+    }
+
+    filled = fill_profile_graph(
+        _resolved(graph),
+        _job_params(images=["one.png"], audios=[], seed=None),
+    )
+
+    assert "58" not in filled
+    assert filled["53"]["inputs"]["model"] == ["192", 0]
+
+
 @pytest.mark.asyncio
 async def test_queued_job_keeps_profile_selected_at_submission(
     tmp_projects_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

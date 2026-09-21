@@ -39,17 +39,28 @@ def load_director_skill() -> str:
     return body
 
 
-def with_director_skill(task_instructions: str, *, guides: Iterable[str] = ()) -> str:
+def with_director_skill(
+    task_instructions: str,
+    *,
+    guides: Iterable[str] = (),
+    soul_id: str | None = None,
+) -> str:
     """Put the live Director contract before task-specific instructions."""
+    from ...core.souls.context import active_soul_id
+    from ...core.souls.store import soul_prompt_blocks
+
     core_block = (
         "<DIRECTOR_SKILL>\n"
         f"{load_director_skill()}\n"
         "</DIRECTOR_SKILL>"
     )
+    soul_block = soul_prompt_blocks(soul_id or active_soul_id())
     stage_blocks = load_stage_guides(guides)
     task_block = (
         "<TASK_INSTRUCTIONS>\n"
         f"{task_instructions.strip()}\n"
         "</TASK_INSTRUCTIONS>"
     )
-    return "\n\n".join(block for block in (core_block, stage_blocks, task_block) if block)
+    return "\n\n".join(
+        block for block in (core_block, soul_block, stage_blocks, task_block) if block
+    )

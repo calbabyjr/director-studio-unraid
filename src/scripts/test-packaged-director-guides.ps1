@@ -25,7 +25,8 @@ $requiredAssets = @(
     "app\\agents\\director\\guides\\reference-frame-generation.md",
     "app\\agents\\director\\guides\\visual-qc.md",
     "app\\agents\\director\\guides\\h3-prompt-writing.md",
-    "app\\agents\\director\\guides\\video-qc.md"
+    "app\\agents\\director\\guides\\video-qc.md",
+    "app\\agents\\director\\guides\\sequence-assembly.md"
 )
 foreach ($expectedPath in $requiredAssets) {
     if (-not $archiveText.Contains("'$expectedPath'")) {

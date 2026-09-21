@@ -124,6 +124,82 @@ def layout_review_to_legacy(value: str | None) -> str | None:
     }.get(value, value)
 
 
+def _layout_lookup_tokens(layout_ref_id: str) -> list[str]:
+    raw = (layout_ref_id or "").strip()
+    if not raw:
+        return []
+    tokens = [raw]
+    if "/" in raw:
+        for part in reversed(raw.split("/")):
+            cleaned = part.split("?")[0].strip()
+            if cleaned.startswith(("lref_", "lay_", "job_")):
+                tokens.append(cleaned)
+                break
+    return list(dict.fromkeys(tokens))
+
+
+def resolve_layout_reference(shot: "Shot", layout_ref_id: str) -> LayoutReference:
+    """Resolve a Layout by LayoutReference id, library asset id, or job id.
+
+    Director chat and image URLs often expose ``lay_…`` while tools require
+    ``lref_…``. Treat both as the same Layout when the match is unique.
+    """
+    tokens = _layout_lookup_tokens(layout_ref_id)
+    if not tokens:
+        raise ValueError("LayoutReference not found: ")
+
+    refs = list(shot.layout_refs)
+    for token in tokens:
+        exact = next((layout for layout in refs if layout.id == token), None)
+        if exact is not None:
+            return exact
+
+    def _unique(items: list[LayoutReference]) -> list[LayoutReference]:
+        seen: set[str] = set()
+        unique: list[LayoutReference] = []
+        for layout in items:
+            if layout.id in seen:
+                continue
+            seen.add(layout.id)
+            unique.append(layout)
+        return unique
+
+    asset_matches = _unique([
+        layout
+        for token in tokens
+        for layout in refs
+        if layout.asset_id and layout.asset_id == token
+    ])
+    if len(asset_matches) == 1:
+        return asset_matches[0]
+    if len(asset_matches) > 1:
+        live = [layout for layout in asset_matches if not layout.superseded_by]
+        pool = live or asset_matches
+        pending = [
+            layout
+            for layout in pool
+            if layout.review_status == LayoutReviewStatus.pending_review
+        ]
+        pool = pending or pool
+        return sorted(pool, key=lambda layout: layout.created_at or "", reverse=True)[0]
+
+    job_matches = _unique([
+        layout
+        for token in tokens
+        for layout in refs
+        if layout.job_id and layout.job_id == token
+    ])
+    if len(job_matches) == 1:
+        return job_matches[0]
+
+    available = ", ".join(
+        f"{layout.id} (asset {layout.asset_id or 'none'})" for layout in refs[-6:]
+    ) or "none"
+    raise ValueError(
+        f"LayoutReference not found: {layout_ref_id}. Available: {available}"
+    )
+
+
 def mirror_legacy_layout_fields(
     shot: Shot,
     *,

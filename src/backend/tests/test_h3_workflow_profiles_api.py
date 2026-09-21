@@ -193,6 +193,68 @@ def test_mapping_must_match_selected_output(
     assert response.json()["code"] == "input_selection_error"
 
 
+def test_import_accepts_comfy_canvas_save(profile_client: TestClient) -> None:
+    canvas = {
+        "last_link_id": 1,
+        "last_node_id": 2,
+        "nodes": [
+            {
+                "id": 4,
+                "type": "MiniMaxH3ReferenceToVideo",
+                "mode": 0,
+                "widgets_values": ["prompt", 864, 480, 56, "match"],
+                "inputs": [
+                    {"name": "prompt", "type": "STRING", "widget": {"name": "prompt"}},
+                    {"name": "width", "type": "INT", "widget": {"name": "width"}},
+                    {"name": "height", "type": "INT", "widget": {"name": "height"}},
+                    {"name": "length", "type": "INT", "widget": {"name": "length"}},
+                    {
+                        "name": "ref_image_size",
+                        "type": "COMBO",
+                        "widget": {"name": "ref_image_size"},
+                    },
+                ],
+                "outputs": [{"name": "CONDITIONING", "links": [1]}],
+            },
+            {
+                "id": 5,
+                "type": "SaveVideo",
+                "title": "Final video",
+                "mode": 0,
+                "inputs": [{"name": "video", "type": "VIDEO", "link": 1}],
+                "outputs": [],
+            },
+        ],
+        "links": [[1, 4, 0, 5, 0, "VIDEO"]],
+        "groups": [],
+        "extra": {},
+        "version": 0.4,
+    }
+
+    response = profile_client.post(
+        "/api/workflow-profiles/h3/imports",
+        files={
+            "workflow": (
+                "h3-canvas.json",
+                json.dumps(canvas).encode(),
+                "application/json",
+            )
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    import_id = response.json()["import_id"]
+    analysis = profile_client.get(
+        f"/api/workflow-profiles/h3/imports/{import_id}/analysis"
+    )
+    assert analysis.status_code == 200, analysis.text
+    body = analysis.json()
+    assert body["output_candidates"][0]["node_id"] == "5"
+    assert body["output_candidates"][0]["class_type"] == "SaveVideo"
+    issues = [issue["message"] for issue in body.get("issues") or []]
+    assert not any("last_link_id" in message for message in issues)
+
+
 def test_import_reports_each_malformed_node_by_name(profile_client: TestClient) -> None:
     graph = {
         "58": {"inputs": {}, "_meta": {"title": "Broken Loader"}},

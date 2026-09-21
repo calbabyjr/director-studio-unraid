@@ -1,1 +1,1 @@
-"""Media helpers (clip resolution, frame extraction)."""
+"""Media helpers (clip resolution, frame extraction, sequence assembly)."""

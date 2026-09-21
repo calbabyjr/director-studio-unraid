@@ -40,6 +40,7 @@ from ...core.projects.transitions import (
     review_layout_reference,
     select_layout_reference,
 )
+from ...core.projects.director_memory import apply_memory_to_system, capture_user_memory
 from ...core.vram import GenerationActiveError
 from ...core.library.store import load_asset
 from ...pipelines.registry import get_pipeline
@@ -81,6 +82,153 @@ _SCRIPT_LOCKED_MESSAGE = (
     "The screenplay is locked and cannot be changed during storyboard work."
 )
 _MAX_STORYBOARD_SUBMISSIONS = 3
+
+
+def _max_tool_turns() -> int:
+    return max(1, int(settings.director_max_tool_turns))
+
+
+def _tool_turn_limit_message(max_turns: int) -> str:
+    return (
+        f"Tool calling exceeded the {max_turns}-turn safety limit. "
+        "Completed tool work from this message was kept. "
+        "Send another message to continue."
+    )
+
+
+_CONTEXT_OVERFLOW_RE = re.compile(
+    r"context[_ -]+(?:length|window)|prompt.{0,40}too (?:long|large)|"
+    r"exceeds? (?:the )?(?:context|maximum)|n_ctx|num_ctx",
+    re.I,
+)
+_KEEP_TOOL_PAYLOAD_KEYS = (
+    "ok",
+    "error",
+    "blocked",
+    "needs_clarification",
+    "shot_id",
+    "layout_ref_id",
+    "job_id",
+    "already_saved",
+)
+_MAX_TOOL_JSON_CHARS = 1800
+_MAX_TOOL_NOTES_CHARS = 900
+_MAX_ASSISTANT_LOOP_CHARS = 800
+
+
+def _is_context_overflow(error: object) -> bool:
+    return bool(_CONTEXT_OVERFLOW_RE.search(str(error) or ""))
+
+
+def _context_overflow_reply() -> str:
+    window = int(getattr(settings, "director_num_ctx", 32768) or 32768)
+    return (
+        f"The Director request filled the model's {window:,} token context window. "
+        "Completed tool work from this message was kept. "
+        "Ask about one Shot or one operation at a time, then send another message."
+    )
+
+
+def _compact_tool_loop_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep tool-loop memory small; the model already saw the full result once."""
+    encoded = json.dumps(payload, ensure_ascii=False, default=str)
+    if len(encoded) <= _MAX_TOOL_JSON_CHARS:
+        return payload
+    compact: dict[str, Any] = {
+        key: payload[key] for key in _KEEP_TOOL_PAYLOAD_KEYS if key in payload
+    }
+    shot = payload.get("shot")
+    if isinstance(shot, dict) and not compact.get("shot_id"):
+        compact["shot_id"] = shot.get("id")
+    notes = payload.get("notes")
+    if isinstance(notes, list):
+        note_text = "\n".join(str(item) for item in notes if str(item).strip())
+    else:
+        note_text = str(notes or "").strip()
+    if note_text:
+        clipped = note_text[:_MAX_TOOL_NOTES_CHARS]
+        if len(note_text) > _MAX_TOOL_NOTES_CHARS:
+            clipped += "…"
+        compact["notes"] = [clipped]
+    compact["truncated"] = True
+    return compact
+
+
+def _message_chars(message: dict[str, Any]) -> int:
+    return len(json.dumps(message, ensure_ascii=False, default=str))
+
+
+def _tool_loop_conversation_char_budget() -> int:
+    """Chars allowed in the native tool-loop message list (system/tools sit outside)."""
+    ctx = max(1, int(getattr(settings, "director_num_ctx", 32768) or 32768))
+    out = max(0, int(getattr(settings, "director_num_predict", 4096) or 0))
+    reserved_tokens = out + 12_000
+    tokens = max(4_000, ctx - reserved_tokens)
+    return tokens * 3
+
+
+def _fit_tool_loop_conversation(
+    conversation: list[dict[str, Any]],
+    *,
+    max_chars: int | None = None,
+) -> list[dict[str, Any]]:
+    """Drop oldest tool exchanges when the follow-up prompt would overflow."""
+    if len(conversation) <= 1:
+        return conversation
+    budget = max_chars if max_chars is not None else _tool_loop_conversation_char_budget()
+    if sum(_message_chars(item) for item in conversation) <= budget:
+        return conversation
+
+    head = conversation[0]
+    groups: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    for item in conversation[1:]:
+        if item.get("role") == "assistant" and current:
+            groups.append(current)
+            current = [item]
+        else:
+            current.append(item)
+    if current:
+        groups.append(current)
+
+    dropped_names: list[str] = []
+    while groups and len(groups) > 1:
+        total = _message_chars(head) + sum(
+            _message_chars(item) for group in groups for item in group
+        )
+        if dropped_names:
+            total += 240 + len(dropped_names) * 24
+        if total <= budget:
+            break
+        dropped = groups.pop(0)
+        for item in dropped:
+            if item.get("role") == "tool" and item.get("tool_name"):
+                dropped_names.append(str(item["tool_name"]))
+            elif item.get("role") == "assistant":
+                for call in item.get("tool_calls") or []:
+                    name = ((call.get("function") or {}).get("name") or "")
+                    if name:
+                        dropped_names.append(str(name))
+
+    fitted = [head]
+    if dropped_names:
+        extra = (
+            f" (+{len(dropped_names) - 24} more)" if len(dropped_names) > 24 else ""
+        )
+        fitted.append(
+            {
+                "role": "user",
+                "content": (
+                    "Earlier tools in this turn already completed: "
+                    + ", ".join(dropped_names[:24])
+                    + extra
+                    + ". Continue from the latest tool results. Do not repeat completed work."
+                ),
+            }
+        )
+    for group in groups:
+        fitted.extend(group)
+    return fitted
 
 # chat_fn(system, user, images=optional base64 list for multimodal)
 ChatFn = Callable[..., Awaitable[str | dict[str, Any]]]
@@ -318,6 +466,8 @@ Communication:
 - You are responsible for asset casting. Never invent an asset ID that is absent from the library inventory.
 - Library inventory is metadata, not proof you saw an image. Use inspect_asset with an exact asset_id and file_key to read candidate images before casting when appearance is unknown or labels are unreliable. Inspect enough to answer the question, not every Library file by default; reuse those observations and do not claim visual inspection without a successful result. Names can identify fictional characters without describing appearance. Ask a focused question when a real conflict affects the user's intended story or casting. If explicit requirements conflict, ask which requirement takes priority; include retaining existing assets and adapting the story as an option instead of assuming replacement or generation. Use reasonable creative judgment for unspecified minor details.
 - When the user uploads images, classify every Image in the same turn from both its visible contents and the user's message. Use classify_chat_image once per Image before other state changes. Supply a concise name in the user's language and factual notes covering visible appearance and intended production use. Use chat_only when the classification is genuinely uncertain.
+- STANDING_NOTES persist across sessions and outrank faded chat history. Call remember_note for lasting user rules; call forget_note when they retract one. Do not treat one-off shot feedback as a standing note.
+- DIRECTOR_SOUL is the active directing persona (taste, blocking, continuity). DIRECTOR_LESSONS are craft that soul has learned across films. Call improve_soul when the user confirms a lasting craft rule that should follow this persona to the next project.
 
 Recommended pipeline; use judgment to decide when to advance:
 1) set_script — save a new or revised story supplied by the user. A premise or one-line brief is not a supplied script: you may expand it freely as a model-authored draft in conversation, but do not call set_script until the user explicitly asks to save, use, or adopt that draft
@@ -353,6 +503,8 @@ Recommended pipeline; use judgment to decide when to advance:
    for a tail-frame origin, the extracted frame is Image1; add other references only when they have a specific job
 8) write_prompt — generate or rewrite the six H3 sections from the selected Pictures; Layout is optional. The backend ensures current Pictures have visual evidence before writing. No approval step is required.
 9) H3 video generation happens later in Production
+10) review_sequence — read planned runtime, clip availability, and continuity issues across the ordered storyboard
+    assemble_sequence — only when the user asks to stitch succeeded clips into a rough cut; skipped Shots are reported, not invented
 
 Tools (name + args):
 - set_script  {"script":"..."}  // only when the user supplies or changes story content; a question is not set_script
@@ -371,9 +523,14 @@ Tools (name + args):
 - accept_prop_design  {"job_id":"...","name":"...","notes":"..."}  // only after the user explicitly accepts the shown prop sheet
 - classify_chat_image  {"image_index":1,"kind":"actors|costumes|scenes|props|layouts|chat_only","name":"...","notes":"...","confidence":0.0}  // required once for every current user upload
 - extract_clip_tail_frame  {"source_shot_id":"...","target_shot_id":"...","source_version":"latest|vN","source_job_id":null,"output_kind":"enhanced|raw"}
-- accept_ref_frame  {"shot_id":"...","layout_ref_id":"...","feedback":"optional concise acceptance note"}
-- revise_ref_frame  {"shot_id":"...","layout_ref_id":"...","feedback":"concise actionable summary","additional_source_refs":[]}
+- accept_ref_frame  {"shot_id":"...","layout_ref_id":"lref_… or lay_…","feedback":"optional concise acceptance note"}
+- revise_ref_frame  {"shot_id":"...","layout_ref_id":"lref_… or lay_…","feedback":"concise actionable summary","additional_source_refs":[]}
+- remember_note  {"text":"...","scope":"project|global"}  // durable rule across sessions
+- forget_note  {"note_id":"mem_…"}  // retract a standing note
+- improve_soul  {"text":"..."}  // lasting craft lesson for this Director soul across films
 - write_prompt / get_status
+- review_sequence  {}  // continuity, runtime, and clip availability for the current cut
+- assemble_sequence  {}  // stitch succeeded H3 clips into a rough cut; only when the user asks to assemble
 
 Vision: the system may attach Image 1…N when the user asks you to inspect references or composition. Describe only what is actually visible.
 
@@ -1019,9 +1176,12 @@ async def orchestrate_chat(
     user_image_captions: list[str] | None = None,
     run_tools: Callable[..., Awaitable[tuple[list[str], set[str]]]],
 ) -> ChatResult:
+    from ...core.souls.context import bind_soul_for_project
+
     project = load_project(project_id)
     if project is None:
         raise ValueError(f"project not found: {project_id}")
+    bind_soul_for_project(project_id)
 
     shots = list_shots(project_id)
     intent, params = detect_intent(
@@ -1139,6 +1299,9 @@ async def orchestrate_chat(
             image_ids,
         )
 
+    capture_user_memory(project_id, message)
+    system_prompt = apply_memory_to_system(DIRECTOR_CHAT_SYSTEM, project_id)
+
     hist_lines: list[str] = []
     for h in (history or [])[-4:]:
         role = h.get("role") or "user"
@@ -1248,7 +1411,7 @@ async def orchestrate_chat(
     try:
         if vision_b64:
             raw = await chat_fn(
-                DIRECTOR_CHAT_SYSTEM,
+                system_prompt,
                 user_prompt,
                 images=vision_b64,
                 require_vision=True,
@@ -1257,7 +1420,7 @@ async def orchestrate_chat(
             )
         else:
             raw = await chat_fn(
-                DIRECTOR_CHAT_SYSTEM,
+                system_prompt,
                 user_prompt,
                 tools=offered_tool_schemas,
                 guides=chat_guides,
@@ -1267,6 +1430,8 @@ async def orchestrate_chat(
     except Exception as e:
         logger.exception("chat llm failed")
         await progress("runtime", f"Inference failed: {e}")
+        if _is_context_overflow(e):
+            return finish(_context_overflow_reply(), actions, image_ids)
         hint = (
             "\nIf Comfy just generated an image, the GPU may still be busy or Ollama may need to reload its model. "
             "Wait for composition or video jobs to finish, then retry, or POST /api/director/wake to warm the model.\n"
@@ -1292,8 +1457,9 @@ async def orchestrate_chat(
             conversation[0]["images"] = vision_b64
         final_reply = ""
         storyboard_retry_pending = False
+        max_tool_turns = _max_tool_turns()
 
-        for _tool_turn in range(4):
+        for _tool_turn in range(max_tool_turns):
             native_content, native_think, native_tools = _native_reply(raw)
             if native_think:
                 await progress("think", native_think)
@@ -1307,7 +1473,7 @@ async def orchestrate_chat(
                     native_tools = fallback_tools
                 else:
                     should_force_storyboard_continuation = (
-                        _tool_turn < 3
+                        _tool_turn < max_tool_turns - 1
                         and not storyboard_budget.exhausted
                         and (
                             (
@@ -1338,10 +1504,10 @@ async def orchestrate_chat(
                             allow_save_storyboard=not storyboard_budget.exhausted,
                         )
                         raw = await chat_fn(
-                            DIRECTOR_CHAT_SYSTEM,
+                            system_prompt,
                             user_prompt,
                             images=vision_b64 or None,
-                            messages=conversation,
+                            messages=_fit_tool_loop_conversation(conversation),
                             tools=offered_tool_schemas,
                             guides=_director_chat_guides(
                                 project,
@@ -1399,7 +1565,11 @@ async def orchestrate_chat(
             conversation.append(
                 {
                     "role": "assistant",
-                    "content": native_content,
+                    "content": (
+                        native_content
+                        if len(native_content) <= _MAX_ASSISTANT_LOOP_CHARS
+                        else native_content[:_MAX_ASSISTANT_LOOP_CHARS] + "…"
+                    ),
                     "tool_calls": [
                         {
                             "type": "function",
@@ -1466,7 +1636,7 @@ async def orchestrate_chat(
                         "role": "tool",
                         "tool_name": tool["name"],
                         "content": json.dumps(
-                            tool_payload,
+                            _compact_tool_loop_payload(tool_payload),
                             ensure_ascii=False,
                         ),
                     }
@@ -1500,29 +1670,36 @@ async def orchestrate_chat(
                 project,
                 allow_save_storyboard=not storyboard_budget.exhausted,
             )
-            raw = await chat_fn(
-                DIRECTOR_CHAT_SYSTEM,
-                user_prompt,
-                images=vision_b64 or None,
-                messages=conversation,
-                tools=offered_tool_schemas,
-                guides=_director_chat_guides(
-                    project,
-                    include_visual_qc=bool(vision_b64),
-                    current_message=message,
-                ),
-            )
+            try:
+                raw = await chat_fn(
+                    system_prompt,
+                    user_prompt,
+                    images=vision_b64 or None,
+                    messages=_fit_tool_loop_conversation(conversation),
+                    tools=offered_tool_schemas,
+                    guides=_director_chat_guides(
+                        project,
+                        include_visual_qc=bool(vision_b64),
+                        current_message=message,
+                    ),
+                )
+            except Exception as exc:
+                logger.exception("chat llm follow-up failed")
+                if _is_context_overflow(exc):
+                    final_reply = _context_overflow_reply()
+                    break
+                raise
             if not isinstance(raw, dict):
                 followup_think, final_reply = split_thinking(str(raw).strip())
                 if followup_think:
                     await progress("think", followup_think)
                 break
-            if _tool_turn == 3:
+            if _tool_turn == max_tool_turns - 1:
                 final_content, final_think, final_tools = _native_reply(raw)
                 if final_think:
                     await progress("think", final_think)
                 final_reply = (
-                    "Tool calling exceeded the four-turn safety limit."
+                    _tool_turn_limit_message(max_tool_turns)
                     if final_tools
                     else final_content or final_reply
                 )
@@ -1530,7 +1707,7 @@ async def orchestrate_chat(
                     storyboard_save_blocked = True
                 break
         else:
-            final_reply = "Tool calling exceeded the four-turn safety limit."
+            final_reply = _tool_turn_limit_message(max_tool_turns)
 
         if not final_reply:
             refreshed_project = load_project(project_id)

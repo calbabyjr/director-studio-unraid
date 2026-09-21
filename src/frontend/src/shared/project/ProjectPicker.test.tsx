@@ -6,33 +6,36 @@ import { ProjectPicker } from "./ProjectPicker";
 
 const createAndSelect = vi.fn();
 const renameProject = vi.fn();
+const setProjectId = vi.fn();
+
+const emptyProject = {
+  id: "prj_empty",
+  name: "Testing props2",
+  script_text: "",
+  mode: "director" as const,
+  created_at: "",
+  updated_at: "",
+  shot_ids: [],
+};
+
+const selectedProject = {
+  id: "prj_test",
+  name: "Testing 1.0",
+  script_text: "",
+  mode: "director" as const,
+  created_at: "",
+  updated_at: "",
+  shot_ids: [],
+};
 
 vi.mock("./ProjectContext", () => ({
   useProject: () => ({
-    projects: [
-      {
-        id: "prj_test",
-        name: "Testing 1.0",
-        script_text: "",
-        mode: "director",
-        created_at: "",
-        updated_at: "",
-        shot_ids: [],
-      },
-    ],
-    projectId: "prj_test",
-    project: {
-      id: "prj_test",
-      name: "Testing 1.0",
-      script_text: "",
-      mode: "director",
-      created_at: "",
-      updated_at: "",
-      shot_ids: [],
-    },
+    projects: [emptyProject, selectedProject],
+    projectId: selectedProject.id,
+    project: selectedProject,
     loading: false,
     error: null,
-    setProjectId: vi.fn(),
+    setProjectId,
     refreshProjects: vi.fn(),
     createAndSelect,
     renameProject,
@@ -116,5 +119,18 @@ describe("ProjectPicker", () => {
 
     await waitFor(() => expect(renameProject).toHaveBeenCalledWith("Dungeon film"));
     expect(screen.queryByRole("dialog", { name: "Rename project" })).toBeNull();
+  });
+
+  it("keeps the selected project first so a rename cannot jump to another project", () => {
+    render(<ProjectPicker />);
+    const select = screen.getByLabelText("Project") as HTMLSelectElement;
+    const options = [...select.querySelectorAll("option")].map((option) => option.value);
+
+    expect(select.value).toBe("prj_test");
+    expect(options[0]).toBe("prj_test");
+    expect(options).toEqual(["prj_test", "prj_empty"]);
+
+    fireEvent.change(select, { target: { value: "prj_test" } });
+    expect(setProjectId).not.toHaveBeenCalled();
   });
 });

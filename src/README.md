@@ -289,7 +289,7 @@ Troubleshooting:
 
 ## Connect a custom H3 workflow
 
-Every clean Portable starts with **Built-in Official H3**. First make sure your custom H3 Ref2AV workflow already runs successfully in the same local ComfyUI. Then connect it at runtime:
+Every clean Portable starts with **Built-in Official H3**. First make sure your custom H3 Ref2AV workflow already runs successfully in the same local ComfyUI. Then connect it at runtime. Canvas Save (UI graph with `nodes`/`links`) and File → Export (API) both import; UI saves are converted to the API prompt graph automatically:
 
 ```text
 Settings -> Workflows -> H3 -> Import Workflow

@@ -2551,7 +2551,11 @@ async def test_native_storyboard_submission_budget_blocks_a_fourth_save(
 @pytest.mark.asyncio
 async def test_native_safety_limit_rejects_mixed_prose_and_pending_storyboard_save(
     tmp_projects_dir,
+    monkeypatch,
 ):
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "director_max_tool_turns", 4)
     project = create_project(
         "Pending save at safety limit",
         "INT. ROOM - NIGHT\nMara watches the intact recorder.",
@@ -2636,6 +2640,39 @@ async def test_native_safety_limit_rejects_mixed_prose_and_pending_storyboard_sa
     persisted_after = load_project(project.id)
     assert persisted_after is not None
     assert persisted_after.model_dump() == persisted_before.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_native_tool_loop_completes_more_than_four_status_rounds(
+    tmp_projects_dir,
+):
+    project = create_project("Deep tool loop", "INT. ROOM - NIGHT\nMara waits.")
+    calls: list[int] = []
+
+    async def chat_fn(system: str, user: str, **kwargs):
+        calls.append(1)
+        if len(calls) <= 8:
+            return {
+                "content": "",
+                "thinking": "",
+                "tool_calls": [{"name": "get_status", "arguments": {}}],
+            }
+        return {
+            "content": "Reviewed eight status snapshots.",
+            "thinking": "",
+            "tool_calls": [],
+        }
+
+    result = await handle_chat(
+        project_id=project.id,
+        message="Read status until you are sure.",
+        svc=object(),
+        chat_fn=chat_fn,
+    )
+
+    assert len(calls) == 9
+    assert result.actions.count("status") == 8
+    assert result.reply == "Reviewed eight status snapshots."
 
 
 @pytest.mark.asyncio
@@ -3565,6 +3602,61 @@ async def test_accept_ref_frame_records_chat_decision_and_selects_layout(
     )
     assert touched == {shot.id}
     assert any("Selected Layout lref_accept for H3" in note for note in notes)
+
+
+@pytest.mark.asyncio
+async def test_accept_ref_frame_resolves_library_asset_id(
+    tmp_projects_dir,
+):
+    project = create_project("Asset id acceptance", "Lu faces door seven.")
+    layout = LayoutReference(
+        id="lref_accept_asset",
+        asset_id="lay_0ece40bc9a8a",
+        job_id="job_accept_asset",
+        purpose="door seven composition",
+        review_status="pending_review",
+        selected_for_h3=False,
+    )
+    shot = Shot(
+        id="sht_dialogue_accept_asset",
+        project_id=project.id,
+        scene_id="sc01",
+        title="Door seven",
+        script_beat="Lu faces door seven.",
+        duration_s=6.0,
+        status=ShotStatus.needs_review,
+        layout_asset_id="lay_0ece40bc9a8a",
+        layout_review_status="pending_review",
+        layout_refs=[layout],
+    )
+    save_shot(shot)
+    save_project(project.model_copy(update={"shot_ids": [shot.id]}))
+
+    notes, touched = await _run_tools(
+        project_id=project.id,
+        tools=[
+            {
+                "name": "accept_ref_frame",
+                "args": {
+                    "shot_id": shot.id,
+                    "layout_ref_id": "lay_0ece40bc9a8a",
+                    "feedback": "use this layout",
+                },
+            }
+        ],
+        svc=object(),
+        actions=[],
+        user_feedback="this one",
+    )
+
+    saved = load_shot(project.id, shot.id)
+    assert saved is not None
+    accepted = saved.layout_refs[0]
+    assert accepted.id == "lref_accept_asset"
+    assert accepted.review_status == LayoutReviewStatus.usable
+    assert accepted.selected_for_h3 is True
+    assert touched == {shot.id}
+    assert any("Selected Layout lref_accept_asset for H3" in note for note in notes)
 
 
 @pytest.mark.asyncio

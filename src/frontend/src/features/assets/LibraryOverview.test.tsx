@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryOverview } from "./LibraryOverview";
-import { deleteLibraryAsset, listLibraryAssets } from "../library/api";
+import { deleteLibraryAsset, listLibraryAssets, recastLibraryAsset } from "../library/api";
 
 const updateLibraryAssetMock = vi.hoisted(() => vi.fn());
 
@@ -15,6 +15,7 @@ vi.mock("../library/api", () => ({
   deleteLibraryAsset: vi.fn(),
   importExternalAsset: vi.fn(),
   listLibraryAssets: vi.fn(),
+  recastLibraryAsset: vi.fn(),
   updateLibraryAsset: updateLibraryAssetMock,
 }));
 
@@ -55,6 +56,8 @@ describe("LibraryOverview asset details", () => {
   it("opens the complete asset set when a Library thumbnail is clicked", async () => {
     render(<LibraryOverview onSelectKind={vi.fn()} />);
 
+    expect(screen.getByRole("button", { name: "View Costumes" })).toBeTruthy();
+    expect(screen.getByText("No wardrobe prepared")).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "View Mara asset set" }));
 
     expect(screen.getByRole("dialog", { name: "Mara assets" })).toBeTruthy();
@@ -97,5 +100,35 @@ describe("LibraryOverview asset details", () => {
 
     expect(await screen.findByRole("dialog", { name: "Mara profile assets" })).toBeTruthy();
     expect(screen.getByText("Right-facing continuity angle")).toBeTruthy();
+  });
+
+  it("moves a Prop into Costumes from the Library detail", async () => {
+    const prop = {
+      ...actor,
+      id: "prp_coat",
+      kind: "props",
+      name: "Red coat",
+      notes: "Wardrobe, not a handheld object",
+      pipeline_id: "external",
+      job_id: "",
+      seed: null,
+      files: { master: "master.jpg" },
+      urls: { master: "/assets/coat.jpg" },
+    };
+    vi.mocked(listLibraryAssets).mockImplementation(async (kind) =>
+      kind === "props" ? [prop] : [],
+    );
+    vi.mocked(recastLibraryAsset).mockResolvedValueOnce({ ...prop, kind: "costumes" });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<LibraryOverview onSelectKind={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "View Red coat asset set" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move to Costumes" }));
+
+    await waitFor(() => {
+      expect(recastLibraryAsset).toHaveBeenCalledWith("props", "prp_coat", "costumes");
+      expect(screen.queryByRole("dialog", { name: "Red coat assets" })).toBeNull();
+    });
+    expect(vi.mocked(listLibraryAssets).mock.calls.some(([kind]) => kind === "costumes")).toBe(true);
   });
 });

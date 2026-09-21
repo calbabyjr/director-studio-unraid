@@ -34,6 +34,18 @@ const STATUS_LABELS: Record<H3LifecycleStatus, string> = {
 };
 type Operation = "idle" | "loading" | "importing" | "saving" | "validating" | "testing" | "activating" | "selecting";
 
+function testJobError(raw: string): string {
+  if (
+    raw.includes("MiniMaxH3MemoryEfficientSageAttentionPatch") ||
+    raw.includes("sageattention")
+  ) {
+    return "The last 56-frame test hit a SageAttention patch this ComfyUI does not have. That patch is now skipped — run the 56-frame test again.";
+  }
+  const exception = raw.match(/exception_message': '([^']+)/);
+  if (exception?.[1]) return exception[1].replace(/\\n/g, " ").trim();
+  return raw;
+}
+
 function remember(importId: string, test?: H3TestRun) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ importId, test }));
@@ -186,7 +198,11 @@ export function H3WorkflowSetup({ active = true }: { active?: boolean }) {
           timer = setTimeout(poll, 2000);
           return;
         }
-        if (nextJob.status !== "succeeded") throw new Error(nextJob.error || `Test ${nextJob.status}.`);
+        if (nextJob.status !== "succeeded") {
+          remember(test.import_id);
+          setTest(null);
+          throw new Error(testJobError(nextJob.error || `Test ${nextJob.status}.`));
+        }
         const candidates = Object.keys(nextJob.outputs).filter((key) => key.startsWith("video_candidate_"));
         if (candidates.length > 1) {
           setOperation("idle");
@@ -253,7 +269,7 @@ export function H3WorkflowSetup({ active = true }: { active?: boolean }) {
         {error ? <div className="banner error" role="alert" tabIndex={-1} ref={errorRef}>{error}</div> : null}
         <section className="section-card" aria-labelledby="custom-h3-title">
           <h2 id="custom-h3-title" className="section-card-title">Custom H3 Workflows</h2>
-          <p className="field-hint">Import a ComfyUI API JSON. Director Studio leaves the internal graph unchanged and only connects its input and final-video boundaries.</p>
+          <p className="field-hint">Import a ComfyUI workflow JSON (canvas Save or File → Export (API)). Director Studio converts canvas saves to the API graph Comfy runs, then only connects its input and final-video boundaries.</p>
           <label className="field"><span>Import Workflow</span><input type="file" accept=".json,application/json" disabled={busy} onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
@@ -267,7 +283,7 @@ export function H3WorkflowSetup({ active = true }: { active?: boolean }) {
           {analysis ? <>
             {analysis.issues.map((issue, index) => <p className="field-hint" key={`${issue.code}-${index}`}>{issue.message}</p>)}
             {analysis.fixed_dependencies.length ? <details><summary>Workflow-owned files</summary>{analysis.fixed_dependencies.map((item) => <p key={`${item.node_id}-${item.input_name}`}>{item.value}</p>)}</details> : null}
-          </> : <p className="empty-copy">Choose the API-format JSON exported by ComfyUI.</p>}
+          </> : <p className="empty-copy">Choose a workflow JSON from ComfyUI (canvas Save or Export API).</p>}
         </section>
 
         <section className="section-card" aria-labelledby="output-title">

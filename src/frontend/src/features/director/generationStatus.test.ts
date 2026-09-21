@@ -41,7 +41,7 @@ describe("generation status formatting", () => {
   it("formats stage, elapsed time, and waiting count", () => {
     expect(
       generationStatusText(status, new Date("2026-08-31T10:02:37Z")),
-    ).toBe("Generating video · 02:37 · 2 jobs waiting");
+    ).toBe("Generating video · H3 video · 02:37 · 2 jobs waiting");
   });
 
   it("formats every runtime phase", () => {
@@ -56,9 +56,9 @@ describe("generation status formatting", () => {
       ),
     );
     expect(labels).toEqual([
-      "Queued · 01:00",
-      "Uploading assets · 01:00",
-      "Saving result · 01:00",
+      "Queued · Layout · 01:00",
+      "Uploading assets · Layout · 01:00",
+      "Saving result · Layout · 01:00",
     ]);
   });
 
@@ -72,7 +72,21 @@ describe("generation status formatting", () => {
         },
         new Date("2026-08-31T10:02:00Z"),
       ),
-    ).toBe("Generating image · 01:00");
+    ).toBe("Generating image · Layout · 01:00");
+  });
+
+  it("surfaces every running job even when chat is not locked", () => {
+    const meter = activityMeter(
+      { ...status, chat_locked: false },
+      new Date("2026-08-31T10:02:37Z"),
+    );
+    expect(meter.kind).toBe("comfy");
+    expect(meter.count).toBe(3);
+    expect(meter.jobs).toEqual([
+      "Generating video · H3 video · 02:37",
+      "Queued · Layout · 01:37",
+      "Queued · Actor · 00:37",
+    ]);
   });
 
   it("explains idle VRAM keep-alive so a loaded model is not mistaken for a crash", () => {

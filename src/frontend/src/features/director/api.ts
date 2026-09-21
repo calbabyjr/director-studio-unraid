@@ -89,7 +89,7 @@ export async function getProject(projectId: string): Promise<ProjectDetail> {
 
 export async function updateProject(
   projectId: string,
-  body: { name?: string; script_text?: string },
+  body: { name?: string; script_text?: string; soul_id?: string },
 ): Promise<Project> {
   const res = await fetch(`/api/projects/${projectId}`, {
     method: "PATCH",
@@ -122,6 +122,95 @@ export interface ChatMessage {
   thinking?: string;
   /** Pipeline steps: GPU queue, tools, etc. */
   steps?: string[];
+}
+
+export interface DirectorMemoryNote {
+  id: string;
+  text: string;
+  scope: "project" | "global";
+  source: "user" | "director" | "auto";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DirectorSoul {
+  id: string;
+  name: string;
+  description: string;
+  builtin: boolean;
+  markdown: string;
+  lessons: string;
+  updated_at: string;
+}
+
+export async function listDirectorSouls(): Promise<DirectorSoul[]> {
+  const res = await fetch("/api/souls");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function createDirectorSoul(body: {
+  name: string;
+  description?: string;
+  markdown?: string;
+}): Promise<DirectorSoul> {
+  const res = await fetch("/api/souls", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function saveDirectorSoul(
+  soulId: string,
+  body: { name?: string; description?: string; markdown?: string; lessons?: string },
+): Promise<DirectorSoul> {
+  const res = await fetch(`/api/souls/${encodeURIComponent(soulId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function deleteDirectorSoul(soulId: string): Promise<void> {
+  const res = await fetch(`/api/souls/${encodeURIComponent(soulId)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
+export async function getDirectorMemory(projectId: string): Promise<DirectorMemoryNote[]> {
+  const res = await fetch(`/api/projects/${projectId}/memory`);
+  if (!res.ok) throw new Error(await parseError(res));
+  const body = await res.json() as { notes?: DirectorMemoryNote[] };
+  return body.notes || [];
+}
+
+export async function addDirectorMemoryNote(
+  projectId: string,
+  text: string,
+  scope: "project" | "global" = "project",
+): Promise<DirectorMemoryNote> {
+  const res = await fetch(`/api/projects/${projectId}/memory`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, scope }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function deleteDirectorMemoryNote(
+  projectId: string,
+  noteId: string,
+): Promise<void> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/memory/${encodeURIComponent(noteId)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
 }
 
 export async function getDirectorChatHistory(projectId: string): Promise<ChatMessage[]> {

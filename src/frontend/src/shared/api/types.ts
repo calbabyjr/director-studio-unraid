@@ -185,6 +185,7 @@ export interface Project {
   name: string;
   script_text: string;
   mode: ProjectMode;
+  soul_id?: string;
   created_at: string;
   updated_at: string;
   shot_ids: string[];

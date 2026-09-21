@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 
 from ...config import settings
 from ...core.vram.orchestrator import GenerationActiveError
+from ...core.projects.director_memory import apply_memory_to_system, capture_user_memory
 from ...core.projects.store import list_shots, load_project
 from .chat_context import project_context_blob, gpt_generation_context_blob
 from .chat_orchestrator import (
@@ -114,7 +115,11 @@ class BackendTurn:
         state = (gpt_generation_context_blob(project, shots, self.message)
                  if explicit_gpt_image_intent(self.message) and not actor_design_intent(self.message)
                  else project_context_blob(project, shots, message=self.message, focused=True))
-        system = DIRECTOR_CHAT_SYSTEM
+        from ...core.souls.context import bind_soul_for_project
+
+        bind_soul_for_project(self.project_id)
+        capture_user_memory(self.project_id, self.message)
+        system = apply_memory_to_system(DIRECTOR_CHAT_SYSTEM, self.project_id)
         if self.images:
             system += "\nInspect the images attached by the backend."
             if self.uploads:

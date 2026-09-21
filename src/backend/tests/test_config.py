@@ -50,6 +50,25 @@ def test_data_dir_derives_all_persistent_subdirectories(tmp_path: Path) -> None:
     assert configured.workflow_profiles_dir == data_root / "workflow_profiles"
 
 
+def test_director_max_tool_turns_defaults_above_picture_review_depth(
+    tmp_path: Path,
+) -> None:
+    configured = Settings(_env_file=None, data_dir=tmp_path)
+
+    assert configured.director_max_tool_turns == 16
+
+
+def test_director_max_tool_turns_can_be_configured_from_environment(
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("DS_DIRECTOR_MAX_TOOL_TURNS=24\n", encoding="utf-8")
+
+    configured = Settings(_env_file=env_file, data_dir=tmp_path)
+
+    assert configured.director_max_tool_turns == 24
+
+
 def test_harness_management_can_be_disabled_explicitly(tmp_path: Path) -> None:
     configured = Settings(
         _env_file=None,

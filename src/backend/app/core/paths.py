@@ -33,7 +33,7 @@ def project_root(project_id: str) -> Path:
 def ensure_project_tree(project_id: str) -> Path:
     """Create standard subdirs under a project. Returns project root."""
     root = project_root(project_id)
-    for sub in ("agent", "shots", "jobs"):
+    for sub in ("agent", "shots", "jobs", "sequence"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     lib = root / "library"
     lib.mkdir(parents=True, exist_ok=True)
@@ -51,6 +51,7 @@ def ensure_project_tree(project_id: str) -> Path:
             "| `library/` | Actors, scenes, layouts, costumes, props (images + asset.json) |\n"
             "| `jobs/` | Generation jobs (inputs/outputs) |\n"
             "| `json-production/` | Persisted JSON Production Picture and Audio selections |\n"
+            "| `sequence/` | Rough-cut assembly and editorial exports |\n"
             "| `agent/` | Director agent context |\n",
             encoding="utf-8",
         )

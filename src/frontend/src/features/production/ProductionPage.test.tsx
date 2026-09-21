@@ -38,6 +38,26 @@ vi.mock("../director/api", () => ({
   replaceShotMaterials: replaceShotMaterialsMock,
 }));
 
+vi.mock("./sequenceApi", () => ({
+  getSequence: vi.fn().mockResolvedValue({
+    project_id: "prj_test",
+    project_name: "Test project",
+    shot_count: 0,
+    scene_count: 0,
+    planned_duration_s: 0,
+    assembled_duration_s: 0,
+    clips_ready: 0,
+    clips_missing: 0,
+    runtime: "0:00",
+    shots: [],
+    issues: [],
+    last_assembly: null,
+  }),
+  assembleSequence: vi.fn(),
+  sequenceExportUrl: (id: string, kind: string) =>
+    `/api/projects/${id}/sequence/export/${kind}`,
+}));
+
 const emptyPrompt: PromptSections = {
   subject_definitions: "",
   summary: "",

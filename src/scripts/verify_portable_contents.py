@@ -115,6 +115,7 @@ REQUIRED_EMBEDDED = {
     "app/agents/director/guides/visual-qc.md",
     "app/agents/director/guides/h3-prompt-writing.md",
     "app/agents/director/guides/video-qc.md",
+    "app/agents/director/guides/sequence-assembly.md",
 }
 
 FORBIDDEN_DIRECTORY_NAMES = {

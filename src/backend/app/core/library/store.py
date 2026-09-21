@@ -162,6 +162,45 @@ def assign_asset_project(
     return asset
 
 
+_RECAST_KINDS = frozenset({("props", "costumes"), ("costumes", "props")})
+
+
+def recast_asset_kind(kind: str, asset_id: str, target_kind: str) -> LibraryAsset:
+    """Move an asset between Props and Costumes, keeping the same id and files."""
+    source = (kind or "").strip().lower()
+    target = (target_kind or "").strip().lower()
+    if source == target:
+        asset = load_asset(source, asset_id)
+        if asset is None:
+            raise ValueError(f"asset not found: {source}/{asset_id}")
+        return asset
+    if (source, target) not in _RECAST_KINDS:
+        raise ValueError("can only move assets between props and costumes")
+    asset = load_asset(source, asset_id)
+    if asset is None:
+        raise ValueError(f"asset not found: {source}/{asset_id}")
+    old_dir = find_asset_dir(source, asset_id)
+    if old_dir is None:
+        raise ValueError(f"asset not found: {source}/{asset_id}")
+    new_dir = asset_write_dir(target, asset_id, project_id=asset.project_id)
+    if old_dir.resolve() != new_dir.resolve():
+        new_dir.parent.mkdir(parents=True, exist_ok=True)
+        if new_dir.exists():
+            raise ValueError(f"target already exists: {target}/{asset_id}")
+        shutil.move(str(old_dir), str(new_dir))
+    meta = dict(asset.meta or {})
+    history = list(meta.get("recast_history") or [])
+    history.append({"from": source, "to": target, "at": _now()})
+    meta["recast_history"] = history
+    meta["recast_from"] = source
+    asset = asset.model_copy(update={"kind": target, "meta": meta})
+    _write_asset(asset)
+    moved = load_asset(target, asset_id) or asset
+    if load_asset(source, asset_id) is not None:
+        raise ValueError(f"asset still present under {source}/{asset_id} after recast")
+    return moved
+
+
 def delete_asset(kind: str, asset_id: str) -> None:
     """Permanently remove a library asset directory (files + asset.json)."""
     adir = find_asset_dir(kind, asset_id)

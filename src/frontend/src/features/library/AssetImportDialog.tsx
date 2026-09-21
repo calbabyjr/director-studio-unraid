@@ -10,6 +10,15 @@ const KIND_LABELS: Record<LibraryKind, string> = {
   voices: "Voices",
 };
 
+const KIND_SINGULAR: Record<LibraryKind, string> = {
+  actors: "actor",
+  scenes: "scene",
+  props: "prop",
+  costumes: "costume",
+  layouts: "layout",
+  voices: "voice",
+};
+
 export function libraryKindLabel(kind: LibraryKind): string {
   return KIND_LABELS[kind];
 }
@@ -27,14 +36,20 @@ export function AssetImportDialog({
 }) {
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isVoice = kind === "voices";
   const label = libraryKindLabel(kind);
+  const singular = KIND_SINGULAR[kind];
   const titleId = `asset-import-${kind}-title`;
+  const canImport = Boolean(file) && !busy && (!isVoice || Boolean(name.trim()));
 
-  const onImport = async (file: File | null) => {
-    if (!file) return;
+  const onImport = async () => {
+    if (!file) {
+      setError(isVoice ? "Choose an audio file first." : "Choose an image file first.");
+      return;
+    }
     if (isVoice && !name.trim()) {
       setError("Name is required for Voice assets.");
       return;
@@ -79,8 +94,8 @@ export function AssetImportDialog({
         {error ? <div className="banner error">{error}</div> : null}
         <p className="field-hint">
           {isVoice
-            ? "Upload a clean 2–15 second voice sample. Name and Description help the Director cast it."
-            : "Choose a clean reference file. A clear name and short notes help the Director assign it."}
+            ? "Name the speaker, choose a clean 2–15 second sample, then Import."
+            : "Choose a clean reference, then Import. A clear name and short notes help the Director assign it."}
         </p>
         <div className="import-form">
           <label className="field">
@@ -108,16 +123,26 @@ export function AssetImportDialog({
               type="file"
               accept={isVoice
                 ? "audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg"
-                : "image/png,image/jpeg,image/webp,image/gif"}
+                : "image/png,image/jpeg,image/jpg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"}
               disabled={busy}
               onChange={(event) => {
-                const file = event.target.files?.[0] || null;
-                event.target.value = "";
-                void onImport(file);
+                setFile(event.target.files?.[0] || null);
+                setError(null);
               }}
             />
+            {file ? <span className="asset-import-file-name">{file.name}</span> : null}
           </label>
         </div>
+        <footer className="asset-import-actions">
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!canImport}
+            onClick={() => void onImport()}
+          >
+            {busy ? "Importing…" : `Import ${singular}`}
+          </button>
+        </footer>
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ from .models import (
     H3OutputSelection,
     H3WorkflowAnalysis,
 )
+from .ui_to_api import normalize_comfy_workflow
 
 MAX_WORKFLOW_BYTES = 8 * 1024 * 1024
 MAX_NODES = 2_000
@@ -49,6 +50,7 @@ def _load_graph(graph: object) -> dict[str, Any]:
             raise ValueError("workflow must be valid JSON") from exc
     if not isinstance(graph, Mapping):
         raise TypeError("workflow must be a JSON object")
+    graph = normalize_comfy_workflow(graph)
     normalized = {str(node_id): node for node_id, node in graph.items()}
     if len(normalized) != len(graph):
         raise ValueError(

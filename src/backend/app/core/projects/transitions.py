@@ -5,6 +5,7 @@ from .layouts import (
     LayoutReviewStatus,
     mirror_legacy_layout_fields,
     replace_layout_reference,
+    resolve_layout_reference,
     sync_selected_layout_refs,
 )
 from .models import PromptSections, RefRole, Shot, ShotRef, ShotStatus
@@ -63,13 +64,7 @@ def ensure_layout_ref_at_picture_1(shot: Shot) -> list[ShotRef]:
 
 
 def _layout_reference(shot: Shot, layout_ref_id: str) -> LayoutReference:
-    target = next(
-        (layout for layout in shot.layout_refs if layout.id == layout_ref_id),
-        None,
-    )
-    if target is None:
-        raise ValueError(f"LayoutReference not found: {layout_ref_id}")
-    return target
+    return resolve_layout_reference(shot, layout_ref_id)
 
 
 def _compatibility_layout_reference(

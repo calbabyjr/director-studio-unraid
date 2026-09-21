@@ -71,12 +71,14 @@ export function AssetDetailDialog({
   onClose,
   onDelete,
   onEdit,
+  onMoveToCostumes,
 }: {
   asset: LibraryAsset;
   busy?: boolean;
   onClose: () => void;
   onDelete?: () => void;
   onEdit?: () => void;
+  onMoveToCostumes?: () => void;
 }) {
   const slots = useMemo(() => assetSlots(asset), [asset]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -105,6 +107,16 @@ export function AssetDetailDialog({
               {onEdit ? (
                 <button type="button" className="btn secondary sm" disabled={busy} onClick={onEdit}>
                   Edit
+                </button>
+              ) : null}
+              {onMoveToCostumes ? (
+                <button
+                  type="button"
+                  className="btn secondary sm"
+                  disabled={busy}
+                  onClick={onMoveToCostumes}
+                >
+                  Move to Costumes
                 </button>
               ) : null}
               {onDelete ? (

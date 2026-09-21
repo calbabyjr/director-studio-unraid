@@ -3,6 +3,7 @@ import { useProject } from "../../shared/project/ProjectContext";
 import {
   deleteLibraryAsset,
   listLibraryAssets,
+  recastLibraryAsset,
   type LibraryAsset,
   type LibraryKind,
 } from "../library/api";
@@ -10,12 +11,13 @@ import { AssetImportDialog } from "../library/AssetImportDialog";
 import { AssetDetailDialog, assetPreviewUrl } from "../library/AssetDetailDialog";
 import { AssetMetadataDialog } from "../library/AssetMetadataDialog";
 
-type VisibleLibraryKind = Exclude<LibraryKind, "layouts" | "costumes">;
+type VisibleLibraryKind = Exclude<LibraryKind, "layouts">;
 
 const GROUPS: { id: VisibleLibraryKind; label: string; empty: string }[] = [
   { id: "actors", label: "Actors", empty: "No cast prepared" },
   { id: "scenes", label: "Scenes", empty: "No locations prepared" },
   { id: "props", label: "Props", empty: "No story objects prepared" },
+  { id: "costumes", label: "Costumes", empty: "No wardrobe prepared" },
   { id: "voices", label: "Voices", empty: "No voices prepared" },
 ];
 
@@ -56,6 +58,28 @@ export function LibraryOverview({ onSelectKind }: {
       });
     return () => { active = false; };
   }, [projectId]);
+
+  const onMoveToCostumes = async (asset: LibraryAsset) => {
+    const confirmed = window.confirm(
+      `Move “${asset.name}” from Props to Costumes?\n\nShots using it as a Prop Picture will use it as a Costume instead.`,
+    );
+    if (!confirmed || !projectId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await recastLibraryAsset(asset.kind, asset.id, "costumes");
+      setDetailAsset(null);
+      const [props, costumes] = await Promise.all([
+        listLibraryAssets("props", projectId),
+        listLibraryAssets("costumes", projectId),
+      ]);
+      setGroups((current) => ({ ...current, props, costumes }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onDeleteAsset = async (asset: LibraryAsset) => {
     const fileCount = Object.values(asset.urls || {}).filter(Boolean).length;
@@ -158,6 +182,7 @@ export function LibraryOverview({ onSelectKind }: {
           busy={busy}
           onClose={() => setDetailAsset(null)}
           onEdit={() => setEditingAsset(detailAsset)}
+          onMoveToCostumes={detailAsset.kind === "props" ? () => void onMoveToCostumes(detailAsset) : undefined}
           onDelete={() => void onDeleteAsset(detailAsset)}
         />
       ) : null}

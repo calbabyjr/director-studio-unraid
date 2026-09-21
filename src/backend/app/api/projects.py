@@ -169,6 +169,7 @@ class UpdateProjectBody(BaseModel):
     name: str | None = None
     script_text: str | None = None
     script_locked: bool | None = None
+    soul_id: str | None = None
 
 
 class ChatHistoryItem(BaseModel):
@@ -514,6 +515,13 @@ async def update_project_endpoint(
         updates["script_text"] = body.script_text
     if body.script_locked is not None:
         updates["script_locked"] = body.script_locked
+    if body.soul_id is not None:
+        from ..core.souls.store import get_soul
+
+        soul_id = body.soul_id.strip()
+        if get_soul(soul_id) is None:
+            raise HTTPException(400, f"unknown Director soul: {soul_id}")
+        updates["soul_id"] = soul_id
     if not updates:
         return project
     project = project.model_copy(update=updates)

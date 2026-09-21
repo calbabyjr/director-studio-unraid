@@ -68,6 +68,13 @@ vi.mock("./api", () => ({
   queueRefFrame: vi.fn(),
   replaceShotMaterials: vi.fn(),
   setDirectorModel: vi.fn(),
+  getDirectorMemory: vi.fn().mockResolvedValue([]),
+  addDirectorMemoryNote: vi.fn(),
+  deleteDirectorMemoryNote: vi.fn(),
+  listDirectorSouls: vi.fn().mockResolvedValue([
+    { id: "studio", name: "Studio director", description: "", builtin: true, markdown: "# Studio", lessons: "", updated_at: "2026-01-01" },
+  ]),
+  updateProject: vi.fn(),
 }));
 
 function deferred<T>() {
@@ -552,19 +559,20 @@ describe("Director shot actions", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText("Generating video · 02:37 · 2 jobs waiting")).toBeTruthy();
+    expect(screen.getByText("Generating video · H3 video · 02:37 · 2 jobs waiting")).toBeTruthy();
     expect((screen.getByPlaceholderText(/Talk to the Director/) as HTMLTextAreaElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByLabelText("Add images") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Project status" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("combobox") as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByTitle(/model used for Director chat/i) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Note scope") as HTMLSelectElement).disabled).toBe(true);
     expect(getDirectorVramStatus).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       vi.advanceTimersByTime(1000);
       await Promise.resolve();
     });
-    expect(screen.getByText("Generating video · 02:38 · 2 jobs waiting")).toBeTruthy();
+    expect(screen.getByText("Generating video · H3 video · 02:38 · 2 jobs waiting")).toBeTruthy();
     expect(getDirectorVramStatus).toHaveBeenCalledTimes(1);
 
     await act(async () => {

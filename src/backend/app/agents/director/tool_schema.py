@@ -9,10 +9,12 @@ from ...config import settings
 from ...core.projects.models import AssetCoverageReviewSubmission, Project
 from .intent import (
     actor_design_intent,
+    assemble_sequence_intent,
     explicit_gpt_image_intent,
     explicit_layout_generation_intent,
     material_review_target_shot_id,
     prop_design_intent,
+    sequence_review_intent,
     tail_frame_extraction_intent,
 )
 from .planner import (
@@ -462,7 +464,10 @@ DIRECTOR_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "layout_ref_id": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Exact LayoutReference id the user accepted.",
+                "description": (
+                    "LayoutReference id (lref_…) or Layout library asset id "
+                    "(lay_…) the user accepted."
+                ),
             },
             "feedback": {
                 "type": "string",
@@ -485,7 +490,10 @@ DIRECTOR_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "layout_ref_id": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Exact LayoutReference id being critiqued.",
+                "description": (
+                    "LayoutReference id (lref_…) or Layout library asset id "
+                    "(lay_…) being critiqued."
+                ),
             },
             "feedback": {
                 "type": "string",
@@ -512,6 +520,60 @@ DIRECTOR_TOOL_SCHEMAS: list[dict[str, Any]] = [
         dict(SHOT_SELECTOR),
     ),
     function_tool(
+        "remember_note",
+        (
+            "Save a durable standing note that survives new chat sessions and "
+            "the short recent-chat window. Use for lasting user rules such as "
+            "setting, casting, wardrobe, or 'never do X'. Do not store one-off "
+            "shot feedback."
+        ),
+        {
+            "text": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 240,
+                "description": "One concise standing rule in the user's language.",
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["project", "global"],
+                "description": "project = this film only; global = every project.",
+            },
+        },
+        required=["text"],
+    ),
+    function_tool(
+        "improve_soul",
+        (
+            "Append a lasting craft lesson to the active Director soul so future "
+            "projects using this soul inherit it. Use after the user confirms a "
+            "durable directing rule, not for one-off shot notes."
+        ),
+        {
+            "text": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 240,
+                "description": "One concise lesson in the user's language.",
+            },
+        },
+        required=["text"],
+    ),
+    function_tool(
+        "forget_note",
+        "Delete one standing note by id or by a unique snippet of its text.",
+        {
+            "note_id": {
+                "type": "string",
+                "description": "Standing note id (mem_…) or a unique text snippet.",
+            },
+            "text": {
+                "type": "string",
+                "description": "Unique snippet of the note to forget if id is unknown.",
+            },
+        },
+    ),
+    function_tool(
         "inspect_asset",
         "Read one exact Library image before casting or answering visual questions, even with no Shots. "
         "Returns visual observations, metadata conflicts and content hash, not image bytes. "
@@ -523,6 +585,23 @@ DIRECTOR_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "get_status",
         "Read project status, or the full saved details of one Shot by exact shot_id before editing it.",
         {"shot_id": {"type": "string", "description": "Optional exact Shot ID to read; omit for project status."}},
+    ),
+    function_tool(
+        "review_sequence",
+        (
+            "Read the current storyboard as a cut: planned runtime, which Shots have "
+            "succeeded H3 clips, and continuity issues such as missing Voice on "
+            "dialogue, left/right axis jumps, Scene/Actor mismatches, and missing "
+            "tail-frame handoffs. Does not generate media."
+        ),
+    ),
+    function_tool(
+        "assemble_sequence",
+        (
+            "Concatenate succeeded H3 clips in storyboard order into a rough-cut "
+            "MP4 and sidecar SRT. Skip Shots that have no usable clip. Use only "
+            "when the user asks to assemble, stitch, or export a watchable cut."
+        ),
     ),
 ]
 
@@ -569,6 +648,8 @@ def director_tool_schemas(
         excluded.update({"queue_ref_frame", "revise_ref_frame"})
     if not tail_frame_extraction_intent(current_message):
         excluded.add("extract_clip_tail_frame")
+    if not assemble_sequence_intent(current_message):
+        excluded.add("assemble_sequence")
     tools = [
         tool
         for tool in DIRECTOR_TOOL_SCHEMAS
@@ -596,6 +677,10 @@ def director_tool_schemas(
             "write_prompt",
             "get_status",
             "inspect_asset",
+            "remember_note",
+            "forget_note",
+            "improve_soul",
+            "review_sequence",
         }
         tools = [
             tool
@@ -622,6 +707,8 @@ def director_chat_guides(
         guides.append("reference-frame-generation")
     if include_visual_qc:
         guides.append("visual-qc")
+    if sequence_review_intent(current_message):
+        guides.append("sequence-assembly")
     return tuple(guides)
 
 

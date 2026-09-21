@@ -63,6 +63,34 @@ def tail_frame_extraction_intent(message: str) -> bool:
     return bool(re.search(r"\b(?:tail|last)\s+frame\b|(?:尾帧|末帧)", text, re.I))
 
 
+def sequence_review_intent(message: str) -> bool:
+    """Continuity, runtime, or editorial-export questions about the cut."""
+    text = normalize_text(message)
+    return bool(
+        re.search(
+            r"\b(?:continuity|rough\s*cut|assemble|assembly|runtime|shot\s*list|"
+            r"edl|subtitle|srt|sequence|timeline|concat|stitche?d?)\b|"
+            r"(?:连贯|连续性|粗剪|成片|字幕|时间线|拼接)",
+            text,
+            flags=re.I,
+        )
+    )
+
+
+def assemble_sequence_intent(message: str) -> bool:
+    """Require an affirmative request before offering ffmpeg assembly."""
+    text = normalize_text(message)
+    return bool(
+        re.search(
+            r"\b(?:assemble|stitch|concat|export)\b.{0,40}\b(?:rough\s*cut|movie|film|sequence|clips?)\b|"
+            r"\b(?:rough\s*cut|make\s+the\s+(?:movie|film)|watchable\s+cut)\b|"
+            r"(?:粗剪|拼接成片|合成成片|导出成片)",
+            text,
+            flags=re.I,
+        )
+    )
+
+
 def layout_activation_mode(message: str) -> str:
     """Map explicit additive language to Layout append; default to replacement."""
     text = normalize_text(message)

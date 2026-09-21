@@ -15,6 +15,7 @@ vi.mock("./api", () => ({
   listLibraryAssets: vi.fn(),
   importExternalAsset: vi.fn(),
   deleteLibraryAsset: vi.fn(),
+  recastLibraryAsset: vi.fn(),
   updateLibraryAsset: updateLibraryAssetMock,
 }));
 
@@ -148,6 +149,7 @@ describe("LibraryPage Voices", () => {
     fireEvent.change(screen.getByLabelText("Image file"), {
       target: { files: [new File(["image"], "mara.png", { type: "image/png" })] },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Import actor" }));
 
     await waitFor(() => expect(importExternalAsset).toHaveBeenCalledWith(expect.objectContaining({
       kind: "actors", name: "Mara", projectId: "prj_test",

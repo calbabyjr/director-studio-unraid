@@ -250,6 +250,52 @@ def test_create_and_list_projects(client):
     assert "shots" in got.json()
 
 
+def test_rename_project_keeps_library_assets(client):
+    from app.core.library.store import write_asset
+
+    created = client.post(
+        "/api/projects",
+        json={"name": "Testing 1.0", "script_text": "A scene in a dungeon."},
+    ).json()
+    pid = created["id"]
+    for kind, asset_id, name, files in (
+        ("actors", "act_keep", "Jenny", {"master": "master.png"}),
+        ("scenes", "scn_keep", "Dungeon", {"master": "master.png"}),
+        ("props", "prp_keep", "Chair", {"master": "master.png"}),
+        ("voices", "voi_keep", "Wendy VO", {"reference": "reference.wav"}),
+    ):
+        write_asset(
+            LibraryAsset(
+                id=asset_id,
+                kind=kind,
+                name=name,
+                pipeline_id="external",
+                job_id="",
+                created_at="2026-01-01T00:00:00+00:00",
+                files=files,
+                project_id=pid,
+            )
+        )
+
+    renamed = client.patch(
+        f"/api/projects/{pid}",
+        json={"name": "W and J evenings 1.0"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["id"] == pid
+    assert renamed.json()["name"] == "W and J evenings 1.0"
+
+    for kind, name in (
+        ("actors", "Jenny"),
+        ("scenes", "Dungeon"),
+        ("props", "Chair"),
+        ("voices", "Wendy VO"),
+    ):
+        listed = client.get("/api/library", params={"kind": kind, "project_id": pid})
+        assert listed.status_code == 200, listed.text
+        assert [asset["name"] for asset in listed.json()] == [name]
+
+
 @pytest.mark.parametrize("path_suffix", ["/chat", "/chat/stream"])
 def test_generation_lock_rejects_text_chat_before_history_write(
     client,

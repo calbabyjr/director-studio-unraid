@@ -15,6 +15,14 @@ export function ProjectPicker() {
     renameProject,
     refreshProjects,
   } = useProject();
+  // Keep the active project first. Changing an <option> label can make the
+  // browser fire change with the first option, which swapped projects on rename.
+  const orderedProjects = projectId
+    ? [
+        ...projects.filter((p) => p.id === projectId),
+        ...projects.filter((p) => p.id !== projectId),
+      ]
+    : projects;
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [newName, setNewName] = useState("");
@@ -80,16 +88,21 @@ export function ProjectPicker() {
       </label>
       <select
         id="global-project"
+        key={`${projectId || "none"}:${project?.name || ""}`}
         className="project-select"
         disabled={loading || busy}
         value={projectId || ""}
-        onChange={(e) => setProjectId(e.target.value || null)}
+        onChange={(e) => {
+          const next = e.target.value || null;
+          if (next === projectId) return;
+          setProjectId(next);
+        }}
         title={project ? `${project.name} (${project.id})` : "Select project"}
       >
-        {projects.length === 0 ? (
+        {orderedProjects.length === 0 ? (
           <option value="">No projects</option>
         ) : (
-          projects.map((p) => (
+          orderedProjects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
             </option>

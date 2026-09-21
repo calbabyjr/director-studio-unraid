@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { getDirectorVramStatus } from "./api";
-import { activityMeter, type ActivityKind } from "./generationStatus";
+import { activityMeter, type ActivityMeterState } from "./generationStatus";
+
+const IDLE: ActivityMeterState = {
+  kind: "idle",
+  label: "Activity · connecting to Director…",
+};
 
 export function ActivityMeter() {
-  const [label, setLabel] = useState("Activity · connecting to Director…");
-  const [kind, setKind] = useState<ActivityKind>("idle");
+  const [state, setState] = useState<ActivityMeterState>(IDLE);
 
   useEffect(() => {
     let cancelled = false;
@@ -12,13 +16,13 @@ export function ActivityMeter() {
       try {
         const status = await getDirectorVramStatus();
         if (cancelled) return;
-        const next = activityMeter(status, new Date());
-        setKind(next.kind);
-        setLabel(next.label);
+        setState(activityMeter(status, new Date()));
       } catch {
         if (!cancelled) {
-          setKind("idle");
-          setLabel("Activity · Director status unreachable");
+          setState({
+            kind: "idle",
+            label: "Activity · Director status unreachable",
+          });
         }
       }
     };
@@ -30,15 +34,32 @@ export function ActivityMeter() {
     };
   }, []);
 
+  const busy = state.kind === "comfy" || state.kind === "llm";
+  const jobs = state.jobs || [];
+
   return (
     <div
-      className={`activity-meter activity-meter-${kind}`}
+      className={`activity-meter activity-meter-${state.kind}${busy ? " activity-meter-busy" : ""}`}
       role="status"
       aria-live="polite"
-      title={label}
+      title={state.label}
     >
       <span className="activity-meter-dot" aria-hidden="true" />
-      <span className="activity-meter-label">{label}</span>
+      <div className="activity-meter-copy">
+        <span className="activity-meter-label">{state.label}</span>
+        {jobs.length > 1 ? (
+          <ul className="activity-meter-jobs">
+            {jobs.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+      {state.count ? (
+        <span className="activity-meter-count">
+          {state.count} {state.count === 1 ? "job" : "jobs"}
+        </span>
+      ) : null}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useProject } from "../../shared/project/ProjectContext";
 import {
   deleteLibraryAsset,
   listLibraryAssets,
+  recastLibraryAsset,
   type LibraryAsset,
   type LibraryKind,
 } from "./api";
@@ -15,6 +16,7 @@ const KINDS: { id: LibraryKind; label: string }[] = [
   { id: "actors", label: "Actors" },
   { id: "scenes", label: "Scenes" },
   { id: "props", label: "Props" },
+  { id: "costumes", label: "Costumes" },
   { id: "layouts", label: "Layouts" },
   { id: "voices", label: "Voices" },
 ];
@@ -64,6 +66,25 @@ export function LibraryPage({
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const onMoveToCostumes = async (asset: LibraryAsset) => {
+    const ok = window.confirm(
+      `Move “${asset.name}” from Props to Costumes?\n\nShots using it as a Prop Picture will use it as a Costume instead.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await recastLibraryAsset(asset.kind || kind, asset.id, "costumes");
+      setFolderAsset(null);
+      if (!lockedKind) setKind("costumes");
+      else refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onDeleteAsset = async (a: LibraryAsset) => {
     const nFiles = Object.keys(a.urls || {}).filter((k) => a.urls[k]).length;
@@ -284,6 +305,7 @@ export function LibraryPage({
           busy={busy}
           onClose={() => setFolderAsset(null)}
           onEdit={() => setEditingAsset(folderAsset)}
+          onMoveToCostumes={folderAsset.kind === "props" ? () => void onMoveToCostumes(folderAsset) : undefined}
           onDelete={() => void onDeleteAsset(folderAsset)}
         />
       ) : null}

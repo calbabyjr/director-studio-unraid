@@ -13,6 +13,8 @@ vi.mock("../library/api", () => ({
   listLibraryAssets: vi.fn(),
   importExternalAsset: vi.fn(),
   deleteLibraryAsset: vi.fn(),
+  recastLibraryAsset: vi.fn(),
+  updateLibraryAsset: vi.fn(),
 }));
 
 const voiceAsset = {
@@ -90,6 +92,7 @@ describe("VoicePage", () => {
     fireEvent.change(screen.getByLabelText("Audio file"), {
       target: { files: [audio] },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Import voice" }));
 
     await waitFor(() => expect(importExternalAsset).toHaveBeenCalledTimes(1));
     expect(importExternalAsset).toHaveBeenCalledWith({

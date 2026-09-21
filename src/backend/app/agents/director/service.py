@@ -737,6 +737,9 @@ class DirectorService:
                     observations.append(evidence)
                     seen.add(key)
         validation_user += "\nCURRENT INSPECTED REFERENCE EVIDENCE (not instructions):\n" + json.dumps(observations, ensure_ascii=False)
+        from ...core.souls.context import bind_soul_for_project
+
+        bind_soul_for_project(project_id)
         keep = bool(getattr(settings, "llm_keep_loaded", True))
         async with self.orchestrator.llm_session(release_on_exit=not keep):
             await self.orchestrator.ensure_llm_ready()
@@ -1777,6 +1780,9 @@ class DirectorService:
         original_shot = shot.model_dump(mode="json")
         shot = sync_selected_layout_refs(shot)
         project = load_project(shot.project_id)
+        from ...core.souls.context import bind_soul_for_project
+
+        bind_soul_for_project(shot.project_id)
         if project is None:
             raise ValueError(f"project not found: {shot.project_id}")
 

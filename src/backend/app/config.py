@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     llm_keep_loaded: bool = True
 
     director_agent_runtime: Literal["legacy", "harness"] = "legacy"
+    # Legacy native-tool loop: model→tools→model rounds per user message.
+    # 4 was too tight for Picture review (inspect each ref, then write_prompt).
+    director_max_tool_turns: int = Field(default=16, ge=1, le=64)
     harness_managed: bool = True
     harness_base_url: str = "http://127.0.0.1:8791"
     harness_internal_token: str = Field(default="", repr=False)

@@ -107,11 +107,19 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       if (!trimmed) {
         throw new Error("name cannot be empty");
       }
-      const updated = await updateProject(projectId, { name: trimmed });
+      const renamedId = projectId;
+      const updated = await updateProject(renamedId, { name: trimmed });
+      setProjects((items) => {
+        const present = items.some((p) => p.id === updated.id);
+        if (!present) return [updated, ...items];
+        return items.map((p) => (p.id === updated.id ? { ...p, ...updated } : p));
+      });
+      setProjectId(renamedId);
       await refreshProjects();
+      setProjectId(renamedId);
       return updated;
     },
-    [projectId, refreshProjects],
+    [projectId, refreshProjects, setProjectId],
   );
 
   const project = useMemo(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ....core.media.clip_generations import ClipGenerationAmbiguous
-from ....core.media import tail_frame
+from ....core.media import sequence, tail_frame
 from ....core.projects.models import Project, Shot
 from ....core.projects.store import load_shot
 from ..intent import material_review_target_shot_id
@@ -39,6 +39,58 @@ async def handle_media_tool(
             return True
         actions.append("status")
         notes.append(runtime.status_summary(project, shots))
+        return True
+    if name == "review_sequence":
+        try:
+            report = sequence.build_sequence_report(project_id)
+        except sequence.SequenceError as exc:
+            if result_payloads is not None:
+                result_payloads.append({"ok": False, "error": str(exc)})
+            notes.append(f"review_sequence failed: {exc}")
+            return True
+        payload = report.model_dump(mode="json")
+        if result_payloads is not None:
+            result_payloads.append({"ok": True, "sequence": payload})
+        actions.append("review_sequence")
+        issue_count = len(report.issues)
+        notes.append(
+            f"Sequence: {report.shot_count} shot(s), planned {report.runtime}, "
+            f"{report.clips_ready} clip(s) ready, {issue_count} continuity issue(s)."
+        )
+        for issue in report.issues[:12]:
+            related = f" (after {issue.related_shot_id})" if issue.related_shot_id else ""
+            notes.append(
+                f"- [{issue.severity}] {issue.code} on {issue.shot_id}{related}: "
+                f"{issue.message}"
+            )
+        if issue_count > 12:
+            notes.append(f"- … {issue_count - 12} more issue(s)")
+        return True
+    if name == "assemble_sequence":
+        try:
+            assembly = sequence.assemble_rough_cut(project_id)
+        except sequence.SequenceError as exc:
+            if result_payloads is not None:
+                result_payloads.append({"ok": False, "error": str(exc)})
+            notes.append(f"assemble_sequence failed: {exc}")
+            return True
+        if result_payloads is not None:
+            result_payloads.append({"ok": True, "assembly": assembly.model_dump(mode="json")})
+        actions.append("assemble_sequence")
+        skipped = (
+            f" Skipped {len(assembly.missing_shot_ids)} shot(s) without clips."
+            if assembly.missing_shot_ids
+            else ""
+        )
+        duration = (
+            f" Duration {assembly.duration_s:.1f}s."
+            if assembly.duration_s
+            else ""
+        )
+        notes.append(
+            f"Assembled a rough cut from {len(assembly.shot_ids)} clip(s) at "
+            f"{assembly.url}.{duration}{skipped}"
+        )
         return True
     if name != "extract_clip_tail_frame":
         return False
