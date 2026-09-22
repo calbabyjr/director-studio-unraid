@@ -6,6 +6,7 @@ C2: h3_ref2va terminal → shot status succeeded/failed when h3_job_id matches
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from ...pipelines.registry import get_pipeline
@@ -34,6 +35,31 @@ _H3_STATUS_MAP = {
 }
 
 
+def _apply_actor_sheet_update(job: JobRecord) -> None:
+    if job.status != JobStatus.succeeded:
+        return
+    if not (job.params or {}).get("update_asset_id"):
+        return
+    try:
+        from ..library.actor_sheet import apply_actor_sheet_update
+
+        apply_actor_sheet_update(job)
+    except Exception:
+        logger.exception("actor sheet update apply failed for %s", job.id)
+
+
+def _kick_production_queue(job: JobRecord) -> None:
+    try:
+        from ..projects.shot_queue import on_h3_job_terminal
+
+        loop = asyncio.get_running_loop()
+        loop.create_task(on_h3_job_terminal(job))
+    except RuntimeError:
+        logger.info("no running loop to continue production queue for %s", job.id)
+    except Exception:
+        logger.exception("production queue advance failed for %s", job.id)
+
+
 def on_pipeline_job_terminal(job: JobRecord) -> None:
     """Hook after a pipeline job reaches succeeded/failed/cancelled."""
     if job.status not in _TERMINAL:
@@ -42,6 +68,15 @@ def on_pipeline_job_terminal(job: JobRecord) -> None:
         _sync_ref_frame(job)
     elif job.pipeline_id == "h3_ref2va":
         _sync_h3_ref2va(job)
+        _kick_production_queue(job)
+    elif job.pipeline_id == "actor":
+        _apply_actor_sheet_update(job)
+    try:
+        from ..projects.director_reflection import reflect_on_job
+
+        reflect_on_job(job)
+    except Exception:
+        logger.exception("director job reflection failed for %s", job.id)
 
 
 def _sync_ref_frame(job: JobRecord) -> None:

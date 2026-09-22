@@ -8,6 +8,10 @@ vi.mock("./H3WorkflowSetup", () => ({
   H3WorkflowSetup: () => <div>H3 setup</div>,
 }));
 
+vi.mock("./UserProfileSetup", () => ({
+  UserProfileSetup: () => <div>user.md editor</div>,
+}));
+
 
 describe("WorkflowSettingsPage", () => {
   afterEach(cleanup);
@@ -21,5 +25,11 @@ describe("WorkflowSettingsPage", () => {
 
     fireEvent.click(close);
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("puts user.md in Settings", () => {
+    render(<WorkflowSettingsPage />);
+    expect(screen.getByText("user.md editor")).toBeTruthy();
+    expect(screen.getByText("You and H3")).toBeTruthy();
   });
 });

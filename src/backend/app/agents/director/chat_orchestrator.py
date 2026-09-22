@@ -88,12 +88,24 @@ def _max_tool_turns() -> int:
     return max(1, int(settings.director_max_tool_turns))
 
 
-def _tool_turn_limit_message(max_turns: int) -> str:
+def _tool_turn_limit_message(max_turns: int, *, actions: list[str] | None = None) -> str:
+    kept = [item for item in (actions or []) if item and item != "llm"]
+    kept_bit = f" Kept this turn: {', '.join(kept[-8:])}." if kept else ""
     return (
         f"Tool calling exceeded the {max_turns}-turn safety limit. "
-        "Completed tool work from this message was kept. "
-        "Send another message to continue."
+        "Completed tool work from this message was kept."
+        f"{kept_bit} "
+        "Send another message to continue — I will pick up from the current project state."
     )
+
+
+_TOOL_WIND_DOWN_PROMPT = (
+    "You have {remaining} tool round(s) left this message. "
+    "Stop calling inspect_asset and get_status. "
+    "write_prompt already reviews Pictures. "
+    "Finish the user's request with the mutating tool now (queue_h3, write_prompt, "
+    "set_shot_scene_ref, patch_shot_refs, save_storyboard), or reply in prose."
+)
 
 
 _CONTEXT_OVERFLOW_RE = re.compile(
@@ -372,6 +384,24 @@ def _claims_storyboard_resubmission(content: str) -> bool:
     )
 
 
+_CLAIMS_PENDING_TOOL = re.compile(
+    r"(?:i(?:['’]ll| will)|let me|going to|i(?:['’]m going to))\s+"
+    r"(?:now\s+)?(?:call|use|run|invoke)\s+"
+    r"(write_prompt|append_shot|save_storyboard|revise_shot|"
+    r"set_shot_scene_ref|patch_shot_refs|queue_\w+)",
+    re.I,
+)
+_PENDING_TOOL_CONTINUATION = (
+    "You described a tool in prose and did not emit a native tool call. "
+    "Call that tool now. Do not repeat the plan. "
+    "For append_shot, pass shot as a JSON object, not a string."
+)
+
+
+def _claims_pending_tool(content: str) -> bool:
+    return bool(_CLAIMS_PENDING_TOOL.search(content or ""))
+
+
 def _claims_completed_storyboard(content: str) -> bool:
     """Detect completion claims that require a successful persisted save."""
     normalized = (content or "").strip().lower()
@@ -466,8 +496,11 @@ Communication:
 - You are responsible for asset casting. Never invent an asset ID that is absent from the library inventory.
 - Library inventory is metadata, not proof you saw an image. Use inspect_asset with an exact asset_id and file_key to read candidate images before casting when appearance is unknown or labels are unreliable. Inspect enough to answer the question, not every Library file by default; reuse those observations and do not claim visual inspection without a successful result. Names can identify fictional characters without describing appearance. Ask a focused question when a real conflict affects the user's intended story or casting. If explicit requirements conflict, ask which requirement takes priority; include retaining existing assets and adapting the story as an option instead of assuming replacement or generation. Use reasonable creative judgment for unspecified minor details.
 - When the user uploads images, classify every Image in the same turn from both its visible contents and the user's message. Use classify_chat_image once per Image before other state changes. Supply a concise name in the user's language and factual notes covering visible appearance and intended production use. Use chat_only when the classification is genuinely uncertain.
-- STANDING_NOTES persist across sessions and outrank faded chat history. Call remember_note for lasting user rules; call forget_note when they retract one. Do not treat one-off shot feedback as a standing note.
+- DIRECTOR_MEMORY is permanent compiled memory. It outranks faded chat. Do not re-litigate a stored rule; change the plan. Call remember_note for lasting user rules; call forget_note when they retract one. Do not store one-off shot feedback.
+- STANDING_NOTES are the working set that feeds DIRECTOR_MEMORY. The backend also learns after every turn so corrections compound.
+- USER is who you are working for (Settings → user.md). DIRECTOR_WORKSPACE files are standing studio or production markdown. Follow them unless the user overrides them this turn. They outrank DIRECTOR_SOUL taste when they conflict.
 - DIRECTOR_SOUL is the active directing persona (taste, blocking, continuity). DIRECTOR_LESSONS are craft that soul has learned across films. Call improve_soul when the user confirms a lasting craft rule that should follow this persona to the next project.
+- TASKS.md is open work. Keep unfinished follow-ups as `- [ ]`. A 30-minute memory check rereads TASKS.md and MEMORY.md and reminds the production when items remain; it does not queue generation.
 
 Recommended pipeline; use judgment to decide when to advance:
 1) set_script — save a new or revised story supplied by the user. A premise or one-line brief is not a supplied script: you may expand it freely as a model-authored draft in conversation, but do not call set_script until the user explicitly asks to save, use, or adopt that draft
@@ -602,10 +635,12 @@ def _native_reply(value: dict[str, Any]) -> tuple[str, str, list[dict[str, Any]]
         name = str(call.get("name") or "").strip()
         arguments = call.get("arguments")
         if name:
+            from .tool_args import coerce_tool_args
+
             tools.append(
                 {
                     "name": name,
-                    "args": arguments if isinstance(arguments, dict) else {},
+                    "args": coerce_tool_args(arguments),
                 }
             )
     return content, thinking, tools
@@ -1213,6 +1248,16 @@ async def orchestrate_chat(
         p = load_project(project_id)
         assert p is not None
         sh = list_shots(project_id)
+        failed_steps = [
+            item
+            for item in steps
+            if "failed" in item.lower() or "blocked:" in item.lower()
+        ]
+        if failed_steps:
+            block = "Work this turn (tools):\n" + "\n".join(
+                f"- {item}" for item in failed_steps[-12:]
+            )
+            r = f"{r.rstrip()}\n\n{block}" if (r or "").strip() else block
         if "save_storyboard" in acts:
             shot_count = len(sh)
             r = f"Storyboard saved: {shot_count} shot{'s' if shot_count != 1 else ''}."
@@ -1257,6 +1302,17 @@ async def orchestrate_chat(
         all_think = "\n".join(thinking_parts)
         if thinking:
             all_think = (all_think + "\n" + thinking).strip() if all_think else thinking
+        try:
+            from ...core.projects.director_learning import learn_from_turn
+
+            learn_from_turn(
+                project_id,
+                user_message=message,
+                assistant_reply=r,
+                actions=acts,
+            )
+        except Exception:
+            logger.exception("director recursive learning failed")
         return ChatResult(
             reply=r,
             actions=acts,
@@ -1488,14 +1544,22 @@ async def orchestrate_chat(
                             )
                         )
                     )
-                    if should_force_storyboard_continuation:
+                    should_force_pending_tool = (
+                        _tool_turn < max_tool_turns - 1
+                        and _claims_pending_tool(native_content)
+                    )
+                    if should_force_storyboard_continuation or should_force_pending_tool:
                         conversation.append(
                             {"role": "assistant", "content": native_content}
                         )
                         conversation.append(
                             {
                                 "role": "user",
-                                "content": _STORYBOARD_CONTINUATION_PROMPT,
+                                "content": (
+                                    _STORYBOARD_CONTINUATION_PROMPT
+                                    if should_force_storyboard_continuation
+                                    else _PENDING_TOOL_CONTINUATION
+                                ),
                             }
                         )
                         project = load_project(project_id) or project
@@ -1665,6 +1729,15 @@ async def orchestrate_chat(
                 final_reply = terminal_tool_reply
                 break
 
+            remaining = max_tool_turns - _tool_turn - 1
+            if 1 <= remaining <= 3:
+                conversation.append(
+                    {
+                        "role": "user",
+                        "content": _TOOL_WIND_DOWN_PROMPT.format(remaining=remaining),
+                    }
+                )
+
             project = load_project(project_id) or project
             offered_tool_schemas = tool_schemas_for(
                 project,
@@ -1699,7 +1772,7 @@ async def orchestrate_chat(
                 if final_think:
                     await progress("think", final_think)
                 final_reply = (
-                    _tool_turn_limit_message(max_tool_turns)
+                    _tool_turn_limit_message(max_tool_turns, actions=actions)
                     if final_tools
                     else final_content or final_reply
                 )
@@ -1707,7 +1780,7 @@ async def orchestrate_chat(
                     storyboard_save_blocked = True
                 break
         else:
-            final_reply = _tool_turn_limit_message(max_tool_turns)
+            final_reply = _tool_turn_limit_message(max_tool_turns, actions=actions)
 
         if not final_reply:
             refreshed_project = load_project(project_id)

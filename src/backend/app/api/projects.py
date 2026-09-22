@@ -18,7 +18,7 @@ import shutil
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable, Literal
+from typing import Any, Iterable
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -30,13 +30,14 @@ from ..agents.director.llm_plan_provider import DirectorLLMPlanProvider
 from ..agents.director.planner import role_to_library_kind
 from ..agents.director.skill_loader import with_director_skill
 from ..config import settings
-from ..core.h3 import (
-    compose_h3_prompt,
-    frames_for_audio_seconds,
-    frames_for_seconds,
-    validate_h3_prompt,
+from ..core.h3 import stamp_user_prompt_lock
+from ..core.h3.submit import (
+    H3SubmitError,
+    H3SubmitOptions,
+    submit_h3_shot,
+    validate_voice_refs,
 )
-from ..core.jobs import create_job, load_job, start_pipeline_job
+from ..core.jobs import start_pipeline_job
 from ..core.library.store import (
     asset_dir,
     create_external_asset,
@@ -52,7 +53,6 @@ from ..core.projects.models import (
     ShotRef,
     ShotVoiceRef,
     ShotStatus,
-    picture_ref_signature,
     voice_ref_signature,
 )
 from ..core.projects.chat_history import (
@@ -70,9 +70,7 @@ from ..core.projects.layouts import (
     LayoutBrief,
     LayoutReference,
     LayoutReviewStatus,
-    layout_prompt_signature,
     mirror_legacy_layout_fields,
-    selected_layout_prompt_context,
     sync_selected_layout_refs,
 )
 from ..core.projects.store import (
@@ -87,7 +85,6 @@ from ..core.projects.store import (
 from ..core.paths import ensure_project_tree
 from ..core.projects.transitions import (
     apply_transition,
-    assert_h3_submittable,
     review_layout_reference,
     select_layout_reference,
 )
@@ -103,12 +100,6 @@ logger = logging.getLogger("director_studio.api.projects")
 _background_chat_tasks: set[Any] = set()
 
 router = APIRouter(tags=["projects"])
-
-
-class H3SubmitOptions(BaseModel):
-    h3_provider: Literal["local", "minimax"] | None = None
-    width: int | None = None
-    height: int | None = None
 
 LIBRARY_KINDS = ("actors", "costumes", "scenes", "props", "layouts")
 CHAT_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -234,6 +225,10 @@ class ApproveLayoutBody(BaseModel):
     layout_asset_id: str | None = None
 
 
+class CastActorBody(BaseModel):
+    actor_id: str
+
+
 class ShotPatchBody(BaseModel):
     refs: list[ShotRef] | None = None
     voice_refs: list[ShotVoiceRef] | None = None
@@ -338,35 +333,7 @@ def _find_shot(shot_id: str) -> Shot:
 
 
 def _validate_voice_refs(shot: Shot) -> list[tuple[ShotVoiceRef, LibraryAsset, Path]]:
-    resolved: list[tuple[ShotVoiceRef, LibraryAsset, Path]] = []
-    total_duration = 0.0
-    for ref in shot.voice_refs:
-        asset = load_asset("voices", ref.asset_id)
-        if asset is None:
-            raise ValueError(f"Voice asset not found: {ref.asset_id}")
-        if asset.kind != "voices":
-            raise ValueError(f"asset is not a Voice reference: {ref.asset_id}")
-        if asset.project_id != shot.project_id:
-            raise ValueError(f"Voice asset belongs to another project: {ref.asset_id}")
-        if not bool((asset.meta or {}).get("h3_ready")):
-            raise ValueError(f"Voice asset is not H3-ready: {ref.asset_id}")
-        filename = (asset.files or {}).get(ref.file_key)
-        if not filename:
-            raise ValueError(
-                f"Voice asset missing file key {ref.file_key!r}: {ref.asset_id}"
-            )
-        path = asset_dir("voices", ref.asset_id, project_id=asset.project_id) / filename
-        if not path.is_file():
-            raise ValueError(f"Voice reference file not found: {ref.asset_id}/{filename}")
-        try:
-            duration = float((asset.meta or {}).get("duration_s"))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Voice asset duration is invalid: {ref.asset_id}") from exc
-        total_duration += duration
-        resolved.append((ref, asset, path))
-    if total_duration > 15.0:
-        raise ValueError("Voice reference total duration must not exceed 15 seconds")
-    return resolved
+    return validate_voice_refs(shot)
 
 
 def _voice_signature(refs: list[ShotVoiceRef]) -> str:
@@ -888,6 +855,7 @@ async def project_chat_endpoint(
         append_chat_message(
             project_id, role="assistant", content=response.reply,
             images=[DirectorChatImage.model_validate(image.model_dump()) for image in response.images],
+            steps=list(response.steps or []),
         )
         return response
     except ValueError as e:
@@ -1115,6 +1083,7 @@ async def _project_chat_stream_response(
                     DirectorChatImage.model_validate(image.model_dump())
                     for image in response.images
                 ],
+                steps=list(response.steps or []),
             )
             await queue.put(
                 {"type": "result", "data": response.model_dump(mode="json")}
@@ -1587,6 +1556,19 @@ async def reject_ref_frame_endpoint(
     return shot
 
 
+@router.post("/shots/{shot_id}/cast-actor", response_model=Shot)
+async def cast_actor_endpoint(shot_id: str, body: CastActorBody) -> Shot:
+    from ..core.projects.cast_pack import cast_actor_on_shot
+
+    shot = _find_shot(shot_id)
+    try:
+        updated = cast_actor_on_shot(shot, body.actor_id.strip())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    save_shot(updated)
+    return updated
+
+
 @router.patch("/shots/{shot_id}", response_model=Shot)
 async def patch_shot_endpoint(shot_id: str, body: ShotPatchBody) -> Shot:
     """Edit refs, prompt sections, duration, dialogue, etc. (LLM not required)."""
@@ -1600,6 +1582,7 @@ async def patch_shot_endpoint(shot_id: str, body: ShotPatchBody) -> Shot:
         updates["prompt_sections"] = PromptSections.model_validate(
             updates["prompt_sections"]
         )
+        updates["meta"] = stamp_user_prompt_lock(shot, updates["prompt_sections"])
     if "refs" in updates and isinstance(updates["refs"], list):
         updates["refs"] = [
             r if isinstance(r, ShotRef) else ShotRef.model_validate(r)
@@ -1824,230 +1807,14 @@ async def submit_shot_endpoint(
     the Director Agent before preflight. Matching prompts do not wake the LLM.
     """
     shot = _find_shot(shot_id)
-    h3_provider = str(
-        (
-            options.h3_provider
-            if options and options.h3_provider
-            else settings.h3_provider
-        )
-        or "local"
-    ).strip().lower()
-    if h3_provider not in {"local", "minimax"}:
-        raise HTTPException(400, f"Unsupported H3 provider: {h3_provider}")
-    if h3_provider == "minimax" and not str(
-        settings.h3_minimax_api_key or ""
-    ).strip():
-        raise HTTPException(400, "MiniMax H3 API key is not configured")
-
-    # Concurrent submit guard
-    if shot.status in (ShotStatus.queued, ShotStatus.running):
-        raise HTTPException(409, f"shot already {shot.status.value}")
-    if shot.h3_job_id:
-        existing = load_job(shot.h3_job_id)
-        if existing and existing.status in (
-            JobStatus.queued,
-            JobStatus.uploading,
-            JobStatus.running,
-        ):
-            raise HTTPException(
-                409,
-                f"H3 job already active: {shot.h3_job_id} ({existing.status.value})",
-            )
-
     try:
-        synchronized = sync_selected_layout_refs(shot)
-        selected_layouts = selected_layout_prompt_context(synchronized)
-        current_layout_signature = layout_prompt_signature(synchronized)
-    except ValueError as e:
-        raise _http_value_error(e) from e
-    if synchronized.refs != shot.refs:
-        shot = synchronized
-        save_shot(shot)
-    else:
-        shot = synchronized
-
-    if bool((shot.meta or {}).get("material_review_pending")):
-        raise HTTPException(
-            409,
-            detail={
-                "code": "material_review_required",
-                "shot_id": shot.id,
-                "message": (
-                    "Shot references changed. Ask the Director to review the current "
-                    "materials and refresh the H3 prompt before submitting."
-                ),
-                "changes": (shot.meta or {}).get("material_changes") or {},
-            },
+        return await submit_h3_shot(
+            shot,
+            options=options,
+            director_service=svc,
+            start_job=start_pipeline_job,
         )
-
-    prompt_layout_signature = str(
-        (shot.meta or {}).get("prompt_layout_signature") or ""
-    )
-    layout_contract_present = (
-        bool(shot.layout_refs)
-        or bool(selected_layouts)
-        or any(
-            key in (shot.meta or {})
-            for key in (
-                "prompt_layout_asset_id",
-                "prompt_layout_asset_ids",
-                "prompt_layout_signature",
-            )
-        )
-    )
-    prompt_voice_signature = str(
-        (shot.meta or {}).get("prompt_voice_signature") or ""
-    )
-    prompt_picture_signature = str(
-        (shot.meta or {}).get("prompt_picture_signature") or ""
-    )
-    current_picture_signature = picture_ref_signature(shot.refs)
-    picture_contract_present = "prompt_picture_signature" in (shot.meta or {})
-    current_voice_signature = _voice_signature(shot.voice_refs)
-    voice_contract_present = bool(shot.voice_refs) or (
-        "prompt_voice_signature" in (shot.meta or {})
-    )
-    if (
-        (picture_contract_present and prompt_picture_signature != current_picture_signature)
-        or (
-            layout_contract_present
-            and prompt_layout_signature != current_layout_signature
-        )
-        or (
-            not shot.source_audio_path
-            and voice_contract_present
-            and prompt_voice_signature != current_voice_signature
-        )
-    ):
-        try:
-            shot = await svc.write_prompts_after_layout(shot.id)
-        except ValueError as e:
-            raise _http_value_error(e) from e
-        except Exception as e:
-            logger.exception(
-                "write_prompts_after_layout before H3 submit failed for %s",
-                shot_id,
-            )
-            raise HTTPException(
-                503,
-                f"Prompt refresh for current layout failed: {e}",
-            ) from e
-
-    try:
-        assert_h3_submittable(shot)
-    except ValueError as e:
-        raise _http_value_error(e) from e
-
-    prompt_text = compose_h3_prompt(shot.prompt_sections)
-    required_layout_indices = [
-        int(item["picture_index"]) for item in selected_layouts
-    ]
-    try:
-        validate_h3_prompt(
-            prompt_text,
-            list(shot.dialogue),
-            audio_count=0 if shot.source_audio_path else len(shot.voice_refs),
-            required_picture_indices=required_layout_indices,
-            submitted_picture_indices=(
-                ref.picture_index for ref in shot.refs
-            ),
-        )
-    except ValueError as e:
-        raise _http_value_error(e) from e
-
-    try:
-        frames = (
-            frames_for_audio_seconds(shot.duration_s)
-            if shot.source_audio_path
-            else frames_for_seconds(shot.duration_s)
-        )
-    except ValueError as e:
-        raise _http_value_error(e) from e
-
-    try:
-        images = _collect_h3_images(shot)
-    except ValueError as e:
-        raise _http_value_error(e) from e
-
-    image_keys = list(images.keys())
-    audio_keys: list[str] = []
-    if not shot.source_audio_path:
-        try:
-            resolved_voice_refs = _validate_voice_refs(shot)
-        except ValueError as e:
-            raise _http_value_error(e) from e
-        for ref, _asset, audio_path in resolved_voice_refs:
-            key = f"voice_audio_{ref.audio_index}"
-            audio_keys.append(key)
-            images[key] = (audio_path.name, audio_path.read_bytes())
-    project = load_project(shot.project_id)
-    portrait = bool(
-        project
-        and any(
-            marker in project.script_text.lower()
-            for marker in ("9:16", "9／16", "竖屏", "vertical")
-        )
-    )
-    width = (
-        int(options.width)
-        if options is not None and options.width is not None
-        else (480 if portrait else 864)
-    )
-    height = (
-        int(options.height)
-        if options is not None and options.height is not None
-        else (864 if portrait else 480)
-    )
-    native_audio_key: str | None = None
-    if shot.source_audio_path:
-        raise HTTPException(
-            400,
-            "The official H3 Ref2AV workflow cannot preserve locked source audio "
-            "exactly; remove the source track or submit it as reference audio.",
-        )
-    job = create_job(
-        pipeline_id="h3_ref2va",
-        asset_kind="productions",
-        name=f"h3:{shot.title}",
-        notes=shot.script_beat,
-        params={
-            "h3_provider": h3_provider,
-            "prompt": prompt_text,
-            "dialogue": list(shot.dialogue),
-            "frames": frames,
-            "duration_s": shot.duration_s,
-            "image_keys": image_keys,
-            "audio_keys": audio_keys,
-            "native_audio_key": native_audio_key,
-            "width": width,
-            "height": height,
-            "shot_id": shot.id,
-            "project_id": shot.project_id,
-            "layout_asset_id": shot.layout_asset_id,
-            "layout_asset_ids": [
-                str(item["asset_id"]) for item in selected_layouts
-            ],
-            "layout_picture_indices": required_layout_indices,
-            "ref_roles": [
-                r.role.value
-                for r in sorted(shot.refs or [], key=lambda x: x.picture_index)
-            ][: len(image_keys)],
-            "output_prefix": f"director-studio/{shot.project_id}/{shot.id}/h3",
-        },
-        project_id=shot.project_id,
-    )
-
-    try:
-        await start_pipeline_job(job, images=images or None)
-    except Exception as e:
-        logger.exception("start_pipeline_job h3_ref2va failed for %s", shot_id)
-        raise HTTPException(503, f"Failed to start H3 job: {e}") from e
-
-    try:
-        shot = apply_transition(shot, "submit_h3")
-    except ValueError as e:
-        raise _http_value_error(e) from e
-
-    shot = shot.model_copy(update={"h3_job_id": job.id})
-    save_shot(shot)
-    return shot
+    except H3SubmitError as exc:
+        raise HTTPException(exc.status_code, detail=exc.detail) from exc
+    except ValueError as exc:
+        raise _http_value_error(exc) from exc

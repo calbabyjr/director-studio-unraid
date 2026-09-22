@@ -1,5 +1,6 @@
 import { PageShell } from "../../shared/components/PageShell";
 import { DirectorSoulSetup } from "./DirectorSoulSetup";
+import { WorkspaceFilesSetup } from "./WorkspaceFilesSetup";
 
 export function DirectorSetupPage({
   onClose,
@@ -9,7 +10,7 @@ export function DirectorSetupPage({
   return (
     <PageShell
       title="Director setup"
-      subtitle="Create and edit directing souls here. You do not need a project open."
+      subtitle="Each director has its own files. You do not need a project open to edit souls."
       className="director-setup-page"
       actions={onClose ? (
         <button
@@ -24,6 +25,7 @@ export function DirectorSetupPage({
       ) : null}
     >
       <DirectorSoulSetup />
+      <WorkspaceFilesSetup scope="project" />
     </PageShell>
   );
 }

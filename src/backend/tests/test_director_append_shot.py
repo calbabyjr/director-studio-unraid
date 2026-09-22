@@ -44,6 +44,18 @@ def snapshot(project):
     return {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in shots_dir(project.id).glob("*.json")}
 
 
+def test_append_accepts_stringified_shot_object(board):
+    from app.agents.director.planner import AppendShotSubmission
+
+    project, svc = board
+    request = payload(project)
+    request["shot"] = json.dumps(request["shot"])
+    parsed = AppendShotSubmission.model_validate(request)
+    new = svc.append_shot(project.id, parsed)
+    assert new.title == "Final wave"
+    assert load_project(project.id).shot_ids[-1] == new.id
+
+
 def test_append_preserves_every_old_file_and_rejects_replay(board):
     project, svc = board
     before = snapshot(project)

@@ -2336,6 +2336,92 @@ async def test_write_prompts_after_layout(director_dirs, enable_reference_review
 
 
 @pytest.mark.asyncio
+async def test_write_prompts_keeps_production_tab_edits(director_dirs, enable_reference_review):
+    from app.agents.director.context_io import save_agent_context
+    from app.agents.director.service import DirectorService
+    from app.core.h3.prompt import stamp_user_prompt_lock
+    from app.core.projects.models import PromptSections, RefRole, ShotRef
+    from app.core.projects.store import save_project
+
+    project = create_project("Locked prompt", "script")
+    actor_dir = director_dirs["library"] / "actors" / "act_lock_actor"
+    actor_dir.mkdir(parents=True)
+    actor_asset = LibraryAsset(
+        id="act_lock_actor",
+        kind="actors",
+        name="Jenny",
+        notes="",
+        pipeline_id="actor",
+        job_id="job_actor",
+        created_at="2026-01-01T00:00:00+00:00",
+        files={"fullbody_threeview": "threeview.png"},
+        meta={},
+    )
+    Image.effect_noise((128, 128), 30).convert("RGB").save(actor_dir / "threeview.png")
+    (actor_dir / "asset.json").write_text(actor_asset.model_dump_json(indent=2), encoding="utf-8")
+    _seed_layout_source_asset(director_dirs["library"], kind="layouts", asset_id="lay_lock01", name="Layout", file_key="layout")
+
+    locked = PromptSections(
+        subject_definitions="Jenny from <Picture 1> nude at the left edge. <Picture 2> is the dungeon.",
+        summary="My locked-off red dungeon establish.",
+        retention_analysis="Keep her small. <Picture 1> <Picture 2>",
+        detailed_description="0–8 seconds: she holds still.",
+        overall_soundscape="Concrete hum.",
+        non_diegetic_music="Cello drone.",
+    )
+    shot = Shot(
+        id="sht_lock0000001",
+        project_id=project.id,
+        scene_id="sc01",
+        title="Establish the Space",
+        script_beat="walk in",
+        duration_s=8.0,
+        status=ShotStatus.needs_review,
+        layout_asset_id="lay_lock01",
+        layout_review_status="approved",
+        refs=[
+            ShotRef(role=RefRole.actor, asset_id="act_lock_actor", file_key="fullbody_threeview", picture_index=1),
+            ShotRef(role=RefRole.layout_ref_frame, asset_id="lay_lock01", picture_index=2),
+        ],
+        prompt_sections=locked,
+        meta=stamp_user_prompt_lock(
+            Shot(
+                id="sht_lock0000001",
+                project_id=project.id,
+                scene_id="sc01",
+                title="Establish the Space",
+                script_beat="walk in",
+                duration_s=8.0,
+            ),
+            locked,
+        ),
+    )
+    save_shot(shot)
+    project.shot_ids = [shot.id]
+    save_project(project)
+    save_agent_context(
+        project.id,
+        AgentContext(project_id=project.id, script_hash="x", last_phase="awaiting_prompt", shot_summaries=[{"id": shot.id}]),
+    )
+    cafe = json.dumps({
+        "subject_definitions": "S1 cafe lead in <Picture 1>. <Picture 2> layout.",
+        "summary": "A short cafe walk-in.",
+        "retention_analysis": "Retain cafe continuity <Picture 1> <Picture 2>.",
+        "detailed_description": "0–8 seconds: Actor enters.",
+        "overall_soundscape": "Cafe ambience.",
+        "non_diegetic_music": "Soft piano.",
+    })
+    provider = FakePlanProvider(response=cafe)
+    enable_reference_review(provider)
+    svc = DirectorService(plan_provider=provider, orchestrator=RecordingOrchestrator())
+    updated = await svc.write_prompts_after_layout(shot.id)
+    assert updated.prompt_sections.summary == "My locked-off red dungeon establish."
+    assert "cafe" not in updated.prompt_sections.summary.lower()
+    assert "Jenny from <Picture 1>" in updated.prompt_sections.subject_definitions
+    assert "<Picture 2>" in updated.prompt_sections.subject_definitions
+
+
+@pytest.mark.asyncio
 async def test_write_prompts_visually_analyzes_a_new_layout_once(director_dirs):
     from PIL import Image
 

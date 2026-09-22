@@ -162,6 +162,7 @@ def ensure_builtin_souls() -> None:
         )
         if not _lessons_path(soul_id).exists():
             _save_lessons(soul_id, [])
+    migrate_legacy_shared_files()
 
 
 def list_souls() -> list[DirectorSoul]:
@@ -193,6 +194,61 @@ def get_soul(soul_id: str) -> DirectorSoul | None:
 def default_soul_id() -> str:
     ensure_builtin_souls()
     return "studio"
+
+
+def resolve_soul_id(soul_id: str | None = None, project_id: str | None = None) -> str:
+    """Active soul, then the project's soul, then studio."""
+    slug = (soul_id or "").strip()
+    if slug:
+        return slug
+    from .context import active_soul_id
+
+    active = active_soul_id()
+    if active:
+        return active
+    if project_id:
+        from ..projects.store import load_project
+
+        project = load_project(project_id)
+        if project is not None and getattr(project, "soul_id", None):
+            return str(project.soul_id)
+    return default_soul_id()
+
+
+def migrate_legacy_shared_files() -> None:
+    """Move pre-soul shared memory/workspace files onto the studio director once."""
+    import shutil
+
+    marker = settings.data_dir / ".soul-files-migrated"
+    if marker.exists():
+        return
+    studio = soul_dir("studio")
+    studio.mkdir(parents=True, exist_ok=True)
+    moves: list[tuple[Path, Path]] = [
+        (settings.data_dir / "memory" / "MEMORY.md", studio / "MEMORY.md"),
+        (settings.data_dir / "memory" / "journal.jsonl", studio / "journal.jsonl"),
+        (settings.data_dir / "director_memory.json", studio / "memory.json"),
+    ]
+    for src, dest in moves:
+        if src.is_file() and not dest.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+    legacy_workspace = settings.data_dir / "workspace"
+    soul_workspace = studio / "workspace"
+    if legacy_workspace.is_dir():
+        soul_workspace.mkdir(parents=True, exist_ok=True)
+        for child in legacy_workspace.iterdir():
+            if not child.is_file() or child.suffix.lower() != ".md":
+                continue
+            if child.name.lower() == "user.md":
+                continue
+            dest = soul_workspace / child.name
+            if not dest.exists():
+                shutil.copy2(child, dest)
+    try:
+        marker.write_text("1\n", encoding="utf-8")
+    except OSError:
+        pass
 
 
 def create_soul(*, name: str, markdown: str = "", description: str = "") -> DirectorSoul:

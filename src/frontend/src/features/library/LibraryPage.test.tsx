@@ -17,6 +17,13 @@ vi.mock("./api", () => ({
   deleteLibraryAsset: vi.fn(),
   recastLibraryAsset: vi.fn(),
   updateLibraryAsset: updateLibraryAssetMock,
+  addLibraryAssetFile: vi.fn(),
+  addActorVoiceSample: vi.fn(),
+  listActorTakes: vi.fn(async () => ({ items: [] })),
+  pinActorTake: vi.fn(),
+  updateActorSheet: vi.fn(),
+  getActorJob: vi.fn(),
+  getLibraryAsset: vi.fn(),
 }));
 
 const voiceAsset = {
@@ -106,6 +113,32 @@ describe("LibraryPage Voices", () => {
     const file = screen.getByLabelText("Audio file") as HTMLInputElement;
     expect(file.accept).toBe("audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg");
     expect(screen.getByLabelText("Description")).toBeTruthy();
+  });
+
+  it("shows actor view count and a linked-voice badge", async () => {
+    vi.mocked(listLibraryAssets).mockImplementation(async (kind) =>
+      kind === "actors"
+        ? [{
+            id: "act_mia",
+            kind: "actors",
+            name: "Mia",
+            notes: "Lead",
+            pipeline_id: "actor",
+            job_id: "job_actor",
+            seed: 1,
+            created_at: "2026-08-25T00:00:00Z",
+            files: { master: "master.png", profile: "profile.png", voice: "voice.wav" },
+            meta: { linked_voice_ids: ["voi_mia"] },
+            urls: { master: "/api/files/library/actors/act_mia/master.png" },
+            project_id: "prj_test",
+          }]
+        : [],
+    );
+    render(<LibraryPage />);
+
+    expect(await screen.findByText("Mia")).toBeTruthy();
+    expect(screen.getByText("2 views · voice")).toBeTruthy();
+    expect(screen.queryByText("3 files")).toBeNull();
   });
 
   it("does not duplicate import inside a locked category page", () => {

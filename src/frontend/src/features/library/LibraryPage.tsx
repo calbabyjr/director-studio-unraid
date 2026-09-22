@@ -277,7 +277,12 @@ export function LibraryPage({
                     ) : (
                       <div className="output-empty">No preview</div>
                     )}
-                    {nFiles > 1 ? (
+                    {a.kind === "actors" ? (
+                      <span className="library-file-badge">
+                        {Object.keys(a.files || {}).filter((key) => !key.startsWith("voice") && a.files[key]).length} views
+                        {(a.meta?.linked_voice_ids as string[] | undefined)?.length ? " · voice" : ""}
+                      </span>
+                    ) : nFiles > 1 ? (
                       <span className="library-file-badge">{nFiles} files</span>
                     ) : null}
                   </div>
@@ -307,6 +312,7 @@ export function LibraryPage({
           onEdit={() => setEditingAsset(folderAsset)}
           onMoveToCostumes={folderAsset.kind === "props" ? () => void onMoveToCostumes(folderAsset) : undefined}
           onDelete={() => void onDeleteAsset(folderAsset)}
+          onUpdated={onMetadataSaved}
         />
       ) : null}
 

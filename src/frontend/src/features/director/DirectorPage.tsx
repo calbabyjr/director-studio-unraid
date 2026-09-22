@@ -9,6 +9,7 @@ import { ShotWorkspace } from "./ShotWorkspace";
 import { ContextUsagePanel } from "./ContextUsage";
 import { ContextCompaction } from "./ContextCompaction";
 import { MemoryNotes } from "./MemoryNotes";
+import { MemoryPatrolStatus } from "./MemoryPatrolStatus";
 import { MobileShotDrawer } from "./MobileShotDrawer";
 import {
   cancelDirectorChatSession,
@@ -448,6 +449,22 @@ function DirectorAgentWorkspace({
     };
   }, [chatActive, loadProject, projectId, refreshProjects]);
 
+  useEffect(() => {
+    if (!projectId || chatActive) return;
+    let disposed = false;
+    const timer = window.setInterval(() => {
+      getDirectorChatHistory(projectId)
+        .then((saved) => {
+          if (!disposed) setMessages(saved);
+        })
+        .catch(() => undefined);
+    }, 20000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [chatActive, projectId]);
+
   // Poll while jobs run; when a new layout appears, push it into the chat
   useEffect(() => {
     if (!projectId) return;
@@ -784,6 +801,7 @@ function DirectorAgentWorkspace({
           </div>
         </div>
         {projectId ? <MemoryNotes projectId={projectId} disabled={busy || generationLocked || chatActive} /> : null}
+        {projectId ? <MemoryPatrolStatus projectId={projectId} /> : null}
 
         {mobile && !chatOnly ? (
           <MobileShotDrawer shots={shots} onOpenImage={setLightbox} />
@@ -792,6 +810,16 @@ function DirectorAgentWorkspace({
         {error ? <div className="banner error">{error}</div> : null}
         {pollError ? <div className="banner error" role="alert" aria-live="polite">{pollError}</div> : null}
         {vramPollError ? <div className="banner error" role="alert" aria-live="polite">{vramPollError}</div> : null}
+
+        <div
+          className={`director-work-banner${chatActive || busy ? " director-work-banner-busy" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {chatActive || busy
+            ? `Working${liveStatus.length ? ` · ${liveStatus[liveStatus.length - 1]}` : liveRuntime ? ` · ${liveRuntime}` : " · Director turn in progress"}`
+            : "Idle · no Director turn running. A plan in chat is not saved work until a tool succeeds."}
+        </div>
 
         {vramStatus && generationStatusText(vramStatus, clockNow) ? (
           <div className="director-generation-status" role="status" aria-live="polite">
@@ -813,7 +841,7 @@ function DirectorAgentWorkspace({
               >
               <div className="chat-role">{m.role === "user" ? "You" : "Director"}</div>
               {m.steps?.length ? (
-                <details className="chat-trace" open={false}>
+                <details className="chat-trace" open={m.steps.some((step) => /failed|blocked/i.test(step))}>
                   <summary>Process ({m.steps.length})</summary>
                   <ol className="chat-steps">
                     {m.steps.map((s, j) => (

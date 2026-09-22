@@ -190,6 +190,17 @@ class AppendShotSubmission(BaseModel):
     )
     shot: NewShotDraft
 
+    @field_validator("shot", mode="before")
+    @classmethod
+    def _shot_must_be_object(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            text = value.strip()
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError("shot must be a JSON object, not a string") from exc
+        return value
+
 
 class StoryboardSubmission(BaseModel):
     """Typed native-tool payload for lossless storyboard persistence."""
@@ -530,11 +541,31 @@ def parse_storyboard_validation(text: str) -> StoryboardValidation:
     return StoryboardValidation.model_validate(data)
 
 
-def parse_prompt_sections_json(text: str) -> dict[str, str]:
+_PROMPT_SECTION_ALIASES = {
+    "subject": "subject_definitions",
+    "subjects": "subject_definitions",
+    "soundscape": "overall_soundscape",
+    "music": "non_diegetic_music",
+    "description": "detailed_description",
+    "retention": "retention_analysis",
+}
+
+
+def parse_prompt_sections_json(
+    text: str,
+    *,
+    fallback: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Parse six-section prompt object from model text."""
     data = _extract_json_payload(text)
     if not isinstance(data, dict):
         raise ValueError("prompt sections JSON must be an object")
+    nested = data.get("prompt_sections")
+    if isinstance(nested, dict):
+        data = nested
+    for alias, key in _PROMPT_SECTION_ALIASES.items():
+        if not str(data.get(key) or "").strip() and data.get(alias):
+            data[key] = data[alias]
     keys = [
         "subject_definitions",
         "summary",
@@ -543,12 +574,19 @@ def parse_prompt_sections_json(text: str) -> dict[str, str]:
         "overall_soundscape",
         "non_diegetic_music",
     ]
+    fallback = fallback or {}
     out: dict[str, str] = {}
+    missing: list[str] = []
     for k in keys:
         val = data.get(k)
         if not isinstance(val, str) or not val.strip():
-            raise ValueError(f"prompt section {k!r} missing or empty")
+            val = fallback.get(k) or ""
+        if not isinstance(val, str) or not val.strip():
+            missing.append(k)
+            continue
         out[k] = val.strip()
+    if missing:
+        raise ValueError(f"prompt section {missing[0]!r} missing or empty")
     return out
 
 

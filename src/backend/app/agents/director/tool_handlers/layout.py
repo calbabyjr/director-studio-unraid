@@ -88,6 +88,7 @@ async def handle_layout_tool(
     notes: list[str],
     touched: set[str],
     prompt_written_shot_ids: set[str],
+    prompt_failed_shot_ids: set[str],
     result_payloads: list[dict[str, Any]] | None,
     images: list[Any] | None,
     user_feedback: str,
@@ -663,6 +664,12 @@ async def handle_layout_tool(
                 "skipped duplicate write_prompt."
             )
             return True
+        if shot.id in prompt_failed_shot_ids:
+            notes.append(
+                f"write_prompt already failed this turn for **{shot.title}**; "
+                "not retrying. Call queue_h3 if the saved prompt is enough, or fix refs first."
+            )
+            return True
         await runtime.emit(
             on_progress, "status", f"Reviewing current references and preparing the H3 prompt for {shot.title}…"
         )
@@ -688,6 +695,7 @@ async def handle_layout_tool(
             touched.add(s2.id)
         except Exception as e:
             logger.exception("write_prompt tool failed")
+            prompt_failed_shot_ids.add(shot.id)
             notes.append(f"Prompt writing failed: {e}")
             if result_payloads is not None:
                 result_payloads.append({"ok": False, "shot_id": shot.id, "error": str(e)})

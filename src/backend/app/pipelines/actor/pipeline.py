@@ -49,6 +49,21 @@ class ActorPipeline(Pipeline):
                         "required": False,
                     },
                     {
+                        "id": "face_image",
+                        "label": "Extra face (optional)",
+                        "required": False,
+                    },
+                    {
+                        "id": "profile_image",
+                        "label": "Extra profile (optional)",
+                        "required": False,
+                    },
+                    {
+                        "id": "back_image",
+                        "label": "Extra back (optional)",
+                        "required": False,
+                    },
+                    {
                         "id": "wardrobe_image",
                         "label": "Wardrobe / model photo (optional)",
                         "required": False,
@@ -89,6 +104,11 @@ class ActorPipeline(Pipeline):
         if not description and "actor" not in uploaded_images:
             raise ValueError("description is required when no actor reference is uploaded")
 
+        extra_images = {
+            key: uploaded_images[key]
+            for key in workflow.EXTRA_IMAGE_KEYS
+            if uploaded_images.get(key)
+        }
         return workflow.build_actor_prompt(
             description=description or workflow.DEFAULT_DESCRIPTION,
             body_description=p.get("body_description") or "",
@@ -96,6 +116,7 @@ class ActorPipeline(Pipeline):
             negative_prompt=p.get("negative_prompt") or "",
             actor_image_name=uploaded_images.get("actor"),
             wardrobe_image_name=uploaded_images.get("wardrobe"),
+            extra_images=extra_images,
             include_headwear=bool(p.get("include_headwear")),
             include_footwear=bool(p.get("include_footwear")),
             seed=job.seed,
@@ -111,7 +132,7 @@ class ActorPipeline(Pipeline):
         return workflow.map_history_outputs(history)
 
     def library_input_keys(self) -> list[str]:
-        return ["actor", "wardrobe"]
+        return ["actor", "wardrobe", *workflow.EXTRA_IMAGE_KEYS]
 
     def postprocess_job_outputs(self, job: JobRecord, saved: dict[str, Any]) -> None:
         """No multipanel hair paste — hair is text-driven; bust is already a crop."""

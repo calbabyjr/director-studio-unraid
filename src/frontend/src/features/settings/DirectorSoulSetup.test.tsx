@@ -25,6 +25,18 @@ vi.mock("../director/api", () => ({
   updateProject: vi.fn(),
 }));
 
+vi.mock("./DirectorMemorySetup", () => ({
+  DirectorMemorySetup: ({ soulId }: { soulId?: string | null }) => (
+    <div>MEMORY.md for {soulId}</div>
+  ),
+}));
+
+vi.mock("./WorkspaceFilesSetup", () => ({
+  WorkspaceFilesSetup: ({ soulId }: { soulId?: string | null }) => (
+    <div>workspace for {soulId}</div>
+  ),
+}));
+
 import {
   createDirectorSoul,
   listDirectorSouls,
@@ -59,6 +71,8 @@ describe("DirectorSoulSetup", () => {
     render(<DirectorSoulSetup />);
 
     const editor = await screen.findByLabelText("soul.md");
+    expect(screen.getByText("MEMORY.md for adult-video")).toBeTruthy();
+    expect(screen.getByText("workspace for adult-video")).toBeTruthy();
     expect((editor as HTMLTextAreaElement).value).toContain("Keep identities exact.");
     fireEvent.change(editor, {
       target: { value: "# Adult video director\n\nKeep identities exact.\nNever swap roles." },

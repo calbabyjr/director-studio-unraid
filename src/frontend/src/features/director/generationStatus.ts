@@ -16,9 +16,17 @@ export interface OllamaResidentModel {
   context_length?: number | null;
 }
 
+export interface DirectorChatActivity {
+  project_id: string;
+  session_id?: string | null;
+  started_at?: string | null;
+}
+
 export interface DirectorVramStatus {
   provider?: string;
   model?: string;
+  director_working?: boolean;
+  director_chats?: DirectorChatActivity[];
   llm_runtime?: {
     provider?: string;
     model?: string;
@@ -37,6 +45,8 @@ export interface DirectorVramStatus {
   ollama_size_vram?: number;
   ollama_ps?: OllamaResidentModel[];
   resident_vram?: number;
+  comfy_queue?: { running: number; pending: number; prompt_id?: string | null };
+  cancel_job_id?: string | null;
 }
 
 export function formatGenerationElapsed(queuedAt: string, now: Date): string {
@@ -66,7 +76,9 @@ export function jobPipelineLabel(job: GenerationJobStatus): string {
     first_frame: "Layout",
     actor: "Actor",
     prop: "Prop",
+    costume: "Costume",
     scene: "Scene",
+    moge_plate: "MoGe",
   };
   return names[job.pipeline_id] || (job.kind === "video" ? "Video" : "Image");
 }
@@ -101,6 +113,7 @@ export interface ActivityMeterState {
   label: string;
   jobs?: string[];
   count?: number;
+  cancelChatProjectIds?: string[];
 }
 
 function shortModel(name: string): string {
@@ -118,15 +131,32 @@ export function activityMeter(status: DirectorVramStatus | null, now: Date): Act
     return { kind: "idle", label: "Activity · connecting to Director…" };
   }
 
+  const chats = status.director_chats || [];
+  if (status.director_working || chats.length) {
+    const started = chats[0]?.started_at;
+    const elapsed = started ? formatGenerationElapsed(started, now) : "00:00";
+    const cancelChatProjectIds = chats
+      .map((chat) => chat.project_id)
+      .filter((id): id is string => Boolean(id));
+    return {
+      kind: "llm",
+      label: `Director working · calling tools / thinking · ${elapsed}`,
+      count: chats.length || 1,
+      cancelChatProjectIds,
+    };
+  }
+
   const jobs = sortedGenerationJobs(status);
   if (jobs.length) {
-    const lines = jobs.map((job) => jobActivityLine(job, now));
     const waiting = Math.max(0, jobs.length - 1);
-    const suffix = waiting > 0 ? ` · ${waiting} ${waiting === 1 ? "job" : "jobs"} waiting` : "";
+    const suffix = waiting > 0 ? ` · ${waiting} waiting` : "";
     return {
       kind: "comfy",
-      label: `ComfyUI · ${lines[0]}${suffix}`,
-      jobs: lines,
+      label: `ComfyUI · ${jobActivityLine(jobs[0], now)}${suffix}${
+        status.comfy_queue?.pending
+          ? ` · queue ${status.comfy_queue.pending}`
+          : ""
+      }`,
       count: jobs.length,
     };
   }
@@ -142,7 +172,7 @@ export function activityMeter(status: DirectorVramStatus | null, now: Date): Act
     const pipeline = status.comfy_pipeline ? ` · ${status.comfy_pipeline}` : "";
     return {
       kind: "comfy",
-      label: `ComfyUI working${pipeline} · 3090 · first load can sit at 0% util while weights stream into VRAM`,
+      label: `ComfyUI working${pipeline} · 3090`,
     };
   }
 

@@ -8,6 +8,9 @@ def test_ref_master_uses_full_identity():
     assert "Preserve the same person" in w.REF_ACTOR_MASTER_PROMPT
     assert "USER DESCRIPTION" in w.REF_ACTOR_MASTER_PROMPT or "written description" in w.REF_ACTOR_MASTER_PROMPT
     assert w.REF_FACE_ONLY_MASTER_PROMPT == w.REF_ACTOR_MASTER_PROMPT
+    assert "simple neutral studio wear" not in w.REF_ACTOR_MASTER_PROMPT
+    assert "fully nude" in w.REF_ACTOR_MASTER_PROMPT
+    assert "Do not invent clothing" in w.REF_ACTOR_MASTER_PROMPT
 
 
 def test_build_appends_description_into_ref_master():
@@ -29,6 +32,8 @@ def test_fullbody_prompt_matches_0081_baseline():
     assert "exactly THREE equal vertical panels" in w.FULLBODY_THREEVIEW_PROMPT
     assert "LEFT: exact front view" in w.FULLBODY_THREEVIEW_PROMPT
     assert "RIGHT: exact back view" in w.FULLBODY_THREEVIEW_PROMPT
+    assert "state of dress" in w.FULLBODY_THREEVIEW_PROMPT
+    assert "nude if the master is nude" in w.FULLBODY_THREEVIEW_PROMPT
     assert "side view" not in w.DEFAULT_NEGATIVE
 
 
@@ -115,3 +120,39 @@ def test_build_can_extract_and_apply_headwear_and_footwear():
 def test_derive_mode_reference():
     assert w.derive_mode(has_actor_ref=True, has_wardrobe_ref=False) == "reference"
     assert w.derive_mode(has_actor_ref=False, has_wardrobe_ref=False) == "text"
+
+
+def test_build_feeds_extra_identity_photos_into_master_and_threeview():
+    graph, _ = w.build_actor_prompt(
+        description="Jenny, adult, long dark hair",
+        actor_image_name="jenny_front.png",
+        extra_images={
+            "face": "jenny_face.png",
+            "profile": "jenny_profile.png",
+            "back": "jenny_back.png",
+        },
+    )
+    assert graph["15"]["inputs"]["image"] == "jenny_front.png"
+    assert graph["16"]["inputs"]["image1"] == [w.NODE_ACTOR_IMAGE, 0]
+    assert graph["16"]["inputs"]["image2"] == [w.EXTRA_IMAGE_NODES["face"], 0]
+    assert graph["16"]["inputs"]["image3"] == [w.EXTRA_IMAGE_NODES["profile"], 0]
+    assert graph[w.EXTRA_IMAGE_NODES["face"]]["inputs"]["image"] == "jenny_face.png"
+    assert graph[w.EXTRA_IMAGE_NODES["back"]]["inputs"]["image"] == "jenny_back.png"
+    assert graph["40"]["inputs"]["image1"] == ["30", 0]
+    assert graph["40"]["inputs"]["image2"] == [w.NODE_ACTOR_IMAGE, 0]
+    assert graph["40"]["inputs"]["image3"] == [w.EXTRA_IMAGE_NODES["back"], 0]
+    master_prompt = graph["63"]["inputs"]["value"]
+    assert "Image 2 and Image 3" in master_prompt
+    assert "face, profile, back" in master_prompt
+    assert "Image 3 is an extra identity view" in graph[w.NODE_FULLBODY_THREEVIEW_PROMPT]["inputs"]["value"]
+
+
+def test_build_without_extras_does_not_add_qwen_image_slots():
+    graph, _ = w.build_actor_prompt(
+        description="text only path with a single ref",
+        actor_image_name="face.png",
+    )
+    assert "image2" not in graph["16"]["inputs"]
+    assert "image3" not in graph["16"]["inputs"]
+    assert "image3" not in graph["40"]["inputs"]
+    assert w.EXTRA_IMAGE_NODES["face"] not in graph

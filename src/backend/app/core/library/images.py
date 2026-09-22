@@ -19,6 +19,10 @@ ROLE_FILE_PREFERENCE: dict[str, tuple[str, ...]] = {
         "bust_threeview",
         "asset_sheet",
         "master",
+        "face",
+        "profile",
+        "back",
+        "threeview_extra",
     ),
     "costume": (
         "master",
@@ -45,6 +49,7 @@ SKIP_FILE_KEYS = frozenset(
         "input_actor_ref",
         "input_wardrobe_ref",
         "wardrobe_ref",  # often 1x1 blank from casting
+        "voice",
     }
 )
 
@@ -79,10 +84,14 @@ def resolve_asset_image(
     for key in preferred_file_keys(role, explicit=file_key):
         if key in SKIP_FILE_KEYS and not file_key:
             continue
+        if str(key).startswith("voice") and not file_key:
+            continue
         name = files.get(key)
         if not name:
             continue
         path = adir / name
+        if path.suffix.lower() not in IMAGE_SUFFIXES:
+            continue
         if path.is_file() and path.stat().st_size > 2048:  # skip tiny placeholders
             return path.name, path.read_bytes(), key
 

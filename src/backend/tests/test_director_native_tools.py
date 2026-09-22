@@ -2676,6 +2676,45 @@ async def test_native_tool_loop_completes_more_than_four_status_rounds(
 
 
 @pytest.mark.asyncio
+async def test_tool_loop_winds_down_before_the_safety_limit(
+    tmp_projects_dir,
+    monkeypatch,
+):
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "director_max_tool_turns", 4)
+    project = create_project("Wind down", "INT. ROOM - NIGHT\nMara waits.")
+    prompts: list[list[dict]] = []
+
+    async def chat_fn(system: str, user: str, **kwargs):
+        prompts.append(list(kwargs.get("messages") or []))
+        if len(prompts) <= 3:
+            return {
+                "content": "",
+                "thinking": "",
+                "tool_calls": [{"name": "get_status", "arguments": {}}],
+            }
+        return {"content": "Shot 1 prompt is ready.", "thinking": "", "tool_calls": []}
+
+    result = await handle_chat(
+        project_id=project.id,
+        message="Read status until you are sure.",
+        svc=object(),
+        chat_fn=chat_fn,
+    )
+
+    wind = [
+        message.get("content", "")
+        for batch in prompts
+        for message in batch
+        if "Stop calling inspect_asset" in str(message.get("content") or "")
+    ]
+    assert wind
+    assert "You have 3 tool round" in wind[0]
+    assert result.reply == "Shot 1 prompt is ready."
+
+
+@pytest.mark.asyncio
 async def test_native_storyboard_submission_budget_rejects_a_fourth_save_in_one_batch(
     tmp_projects_dir,
 ):

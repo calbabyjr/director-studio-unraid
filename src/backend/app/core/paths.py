@@ -23,7 +23,7 @@ from pathlib import Path
 
 from ..config import settings
 
-LIBRARY_KINDS = ("actors", "costumes", "scenes", "props", "layouts")
+LIBRARY_KINDS = ("actors", "costumes", "scenes", "props", "layouts", "voices")
 
 
 def project_root(project_id: str) -> Path:
@@ -33,7 +33,7 @@ def project_root(project_id: str) -> Path:
 def ensure_project_tree(project_id: str) -> Path:
     """Create standard subdirs under a project. Returns project root."""
     root = project_root(project_id)
-    for sub in ("agent", "shots", "jobs", "sequence"):
+    for sub in ("agent", "shots", "jobs", "sequence", "workspace"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     lib = root / "library"
     lib.mkdir(parents=True, exist_ok=True)
@@ -52,6 +52,7 @@ def ensure_project_tree(project_id: str) -> Path:
             "| `jobs/` | Generation jobs (inputs/outputs) |\n"
             "| `json-production/` | Persisted JSON Production Picture and Audio selections |\n"
             "| `sequence/` | Rough-cut assembly and editorial exports |\n"
+            "| `workspace/` | Production markdown the Director loads (AGENTS.md and extras) |\n"
             "| `agent/` | Director agent context |\n",
             encoding="utf-8",
         )

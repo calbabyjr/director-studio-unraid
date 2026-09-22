@@ -10,11 +10,11 @@ Policy (simple workbench path):
 from __future__ import annotations
 
 import copy
-import json
 import random
 from typing import Any
 
 from ...config import settings
+from ...core.json_cache import load_json_file
 from ...core.schemas import ComfyImageRef
 
 # --- Inputs (user-facing) ---
@@ -23,6 +23,14 @@ NODE_BODY = "59"  # Body Description (optional)
 NODE_HAIR = "60"  # Hairstyle description (optional, text authority)
 NODE_ACTOR_IMAGE = "15"  # optional; blank 1x1 → text path
 NODE_WARDROBE_IMAGE = "23"  # optional; blank 1x1 → keep original wardrobe
+# Extra identity stills injected at fill time (not in the stock workbench JSON).
+EXTRA_IMAGE_NODES = {
+    "face": "80",
+    "profile": "81",
+    "back": "82",
+    "threeview_extra": "83",
+}
+EXTRA_IMAGE_KEYS = ("face", "profile", "back", "threeview_extra")
 NODE_WARDROBE_EXTRACT_PROMPT = "50"
 NODE_NEGATIVE = "11"
 NODE_REF_BASE_PROMPT = "63"  # actor ref → master base
@@ -60,7 +68,8 @@ DEFAULT_NEGATIVE = (
     "deformed hands, malformed fingers, deformed feet, "
     "dramatic pose, text, watermark, collage, cluttered background, blur, "
     "inconsistent hairstyle across panels, wrong rear hairstyle, "
-    "inventing a bun when hair is described as loose, converting loose hair to updo"
+    "inventing a bun when hair is described as loose, converting loose hair to updo, "
+    "invented clothing, studio wear on a nude body, covering a nude reference"
 )
 
 DEFAULT_DESCRIPTION = (
@@ -95,9 +104,24 @@ REF_ACTOR_MASTER_PROMPT = (
     "head to toe with margin, plain seamless white studio background, soft even lighting. "
     "If the reference is a close-up face only, invent a natural full body consistent with that "
     "face and the written description (do not invent a different person). "
-    "Outfit and footwear: follow the USER DESCRIPTION below when it specifies clothing or "
-    "bare feet / shoes; otherwise keep clear clothes from image 1, else simple neutral studio wear. "
+    "State of dress: follow the USER DESCRIPTION when it specifies clothing, lingerie, "
+    "bare feet, or fully unclothed. Otherwise copy the exact dress state from image 1, "
+    "including fully nude or barefoot when that is what the photo shows. "
+    "Do not invent clothing, lingerie, towels, drapes, or studio wear. "
     "Exactly one person, no text, no collage, no props."
+)
+
+_EXTRA_MASTER_PROMPT = (
+    " Additional photos of the SAME person are provided as Image 2"
+    "{and_image3} ({labels}). Fuse identity from every photo: face from close-ups, "
+    "body and hair from full or back views. Do not invent a different person or average "
+    "two people together."
+)
+
+_EXTRA_THREEVIEW_PROMPT = (
+    " Image 3 is an extra identity view of the same person (back, profile, or face). "
+    "Use it to lock the matching panel, especially the back view. Keep identity "
+    "consistent with Image 1 and Image 2."
 )
 
 # Alias kept for older tests/imports
@@ -113,7 +137,8 @@ _FULLBODY_THREEVIEW_PROMPT_TEMPLATE = (
     "FORBIDDEN: more than three people, extra clones, a row of extra backs, six-panel grids, "
     "duplicated bodies, or extra mini-figures between panels. "
     "Every panel: complete body head to toe, upright neutral pose, arms at sides. "
-    "Keep the same hairstyle, clothing, body, and feet/footwear as the master across all panels. "
+    "Keep the same hairstyle, state of dress (including nude if the master is nude), "
+    "body, and feet/footwear as the master across all panels. "
     "{headwear_instruction} "
     "LEFT: exact front view. CENTER: right-facing 45-degree three-quarter. "
     "RIGHT: exact back view. "
@@ -148,28 +173,37 @@ def _strip_dynamic_per_view_nodes(prompt: dict[str, Any]) -> None:
 
 
 def _use_workbench_multipanel_threeview(
-    prompt: dict[str, Any], *, include_headwear: bool
+    prompt: dict[str, Any],
+    *,
+    include_headwear: bool,
+    extra_image3_node: str | None = None,
 ) -> None:
     """
     Keep qwen_actor_asset_workbench multipanel three-view:
-      encode 40 (image1=master 30, image2=actor ref 15) → sample → decode 45 → save 46
+      encode 40 (image1=master 30, image2=actor ref 15, optional image3 extra)
+      → sample → decode 45 → save 46
     Bust = crop 32 from 45; no second bust sampler.
     """
     _strip_dynamic_per_view_nodes(prompt)
     for nid in BUST_SAMPLER_NODES:
         prompt.pop(nid, None)
 
+    threeview_prompt = _fullbody_threeview_prompt(include_headwear=include_headwear)
+    if extra_image3_node:
+        threeview_prompt = f"{threeview_prompt}{_EXTRA_THREEVIEW_PROMPT}"
     if NODE_FULLBODY_THREEVIEW_PROMPT in prompt:
-        prompt[NODE_FULLBODY_THREEVIEW_PROMPT]["inputs"]["value"] = (
-            _fullbody_threeview_prompt(include_headwear=include_headwear)
-        )
+        prompt[NODE_FULLBODY_THREEVIEW_PROMPT]["inputs"]["value"] = threeview_prompt
     if NODE_BUST_THREEVIEW_PROMPT in prompt:
         prompt[NODE_BUST_THREEVIEW_PROMPT]["inputs"]["value"] = BUST_THREEVIEW_PROMPT
 
-    # Master + original reference into three-view
+    # Master + original reference into three-view; extra identity still as image3
     if "40" in prompt:
         prompt["40"]["inputs"]["image1"] = ["30", 0]
         prompt["40"]["inputs"]["image2"] = [NODE_ACTOR_IMAGE, 0]
+        if extra_image3_node:
+            prompt["40"]["inputs"]["image3"] = [extra_image3_node, 0]
+        else:
+            prompt["40"]["inputs"].pop("image3", None)
         if "67" in prompt:
             prompt["40"]["inputs"]["prompt"] = ["67", 0]
 
@@ -263,7 +297,44 @@ def load_base_prompt() -> dict[str, Any]:
         path = settings.workflow_path
     if not path.exists():
         raise FileNotFoundError(f"Workflow API JSON not found: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return load_json_file(path)
+
+
+def _inject_extra_identity_refs(
+    prompt: dict[str, Any], extra_images: dict[str, str]
+) -> str | None:
+    """Load extra identity stills and wire them into master + three-view encodes.
+
+    Qwen Edit Plus accepts three images. Master encode uses image1=primary actor
+    plus up to two extras. Three-view encode uses image3 for a back/profile still.
+    """
+    extras = {
+        key: extra_images[key]
+        for key in EXTRA_IMAGE_KEYS
+        if extra_images.get(key)
+    }
+    for key, nid in EXTRA_IMAGE_NODES.items():
+        name = extras.get(key)
+        if not name:
+            prompt.pop(nid, None)
+            continue
+        prompt[nid] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": name},
+            "_meta": {"title": f"[INPUT] Extra {key.replace('_', ' ')}"},
+        }
+
+    if "16" in prompt:
+        inputs = prompt["16"]["inputs"]
+        inputs.pop("image2", None)
+        inputs.pop("image3", None)
+        for index, key in enumerate(list(extras)[:2]):
+            inputs[f"image{index + 2}"] = [EXTRA_IMAGE_NODES[key], 0]
+
+    for key in ("back", "profile", "threeview_extra", "face"):
+        if extras.get(key):
+            return EXTRA_IMAGE_NODES[key]
+    return None
 
 
 def build_actor_prompt(
@@ -274,6 +345,7 @@ def build_actor_prompt(
     negative_prompt: str = "",
     actor_image_name: str | None = None,
     wardrobe_image_name: str | None = None,
+    extra_images: dict[str, str] | None = None,
     include_headwear: bool = False,
     include_footwear: bool = False,
     seed: int | None = None,
@@ -284,12 +356,18 @@ def build_actor_prompt(
 
     - No actor image → text-to-actor master
     - Actor image → ref into master (node 15→16) and into three-view (image2)
+    - Extra identity photos → master image2/image3 and three-view image3
     - Single description text (legacy body/hair fields ignored / cleared)
     - Full-body three-view: workbench multipanel once
     - Bust three-view: crop of that sheet
     """
     prompt = copy.deepcopy(load_base_prompt())
     resolved_seed = seed if seed is not None else random.randint(0, 2**32 - 1)
+    extras = {
+        key: name
+        for key, name in (extra_images or {}).items()
+        if key in EXTRA_IMAGE_KEYS and name
+    }
 
     # Single description — also injected into ref-path master (node 63), not only text path 58
     desc = (description or "").strip() or DEFAULT_DESCRIPTION
@@ -299,9 +377,19 @@ def build_actor_prompt(
     prompt[NODE_NEGATIVE]["inputs"]["text"] = negative_prompt or DEFAULT_NEGATIVE
 
     # Master base + user description (outfit/footwear follow description when stated)
+    extra_keys = [key for key in EXTRA_IMAGE_KEYS if extras.get(key)]
+    master_prompt = REF_ACTOR_MASTER_PROMPT
+    if extra_keys:
+        master_prompt = (
+            master_prompt
+            + _EXTRA_MASTER_PROMPT.format(
+                and_image3=" and Image 3" if len(extra_keys) > 1 else "",
+                labels=", ".join(extra_keys),
+            )
+        )
     if NODE_REF_BASE_PROMPT in prompt:
         prompt[NODE_REF_BASE_PROMPT]["inputs"]["value"] = (
-            f"{REF_ACTOR_MASTER_PROMPT}\n\nUSER DESCRIPTION:\n{desc}"
+            f"{master_prompt}\n\nUSER DESCRIPTION:\n{desc}"
         )
 
     # Neutral concat delimiters (body/hair nodes empty; description already in 63)
@@ -331,8 +419,12 @@ def build_actor_prompt(
     if "16" in prompt:
         prompt["16"]["inputs"]["image1"] = [NODE_ACTOR_IMAGE, 0]
 
+    extra_image3 = _inject_extra_identity_refs(prompt, extras)
+
     _use_workbench_multipanel_threeview(
-        prompt, include_headwear=include_headwear
+        prompt,
+        include_headwear=include_headwear,
+        extra_image3_node=extra_image3,
     )
 
     for nid in SEED_NODES:

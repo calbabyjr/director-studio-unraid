@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ..paths import ensure_project_tree
+from ..paths import ensure_project_tree, project_root
 
 
 class DirectorChatImage(BaseModel):
@@ -24,14 +24,17 @@ class DirectorChatMessage(BaseModel):
     content: str
     created_at: str
     images: list[DirectorChatImage] = Field(default_factory=list)
+    steps: list[str] = Field(default_factory=list)
 
 
-def chat_history_path(project_id: str) -> Path:
-    return ensure_project_tree(project_id) / "agent" / "chat.jsonl"
+def chat_history_path(project_id: str, *, create: bool = False) -> Path:
+    if create:
+        return ensure_project_tree(project_id) / "agent" / "chat.jsonl"
+    return project_root(project_id) / "agent" / "chat.jsonl"
 
 
 def load_chat_history(project_id: str) -> list[DirectorChatMessage]:
-    path = chat_history_path(project_id)
+    path = chat_history_path(project_id, create=False)
     if not path.is_file():
         return []
     messages: list[DirectorChatMessage] = []
@@ -53,6 +56,7 @@ def append_chat_message(
     role: Literal["user", "assistant"],
     content: str,
     images: list[DirectorChatImage] | None = None,
+    steps: list[str] | None = None,
 ) -> DirectorChatMessage:
     message = DirectorChatMessage(
         id=f"msg_{uuid.uuid4().hex}",
@@ -60,8 +64,10 @@ def append_chat_message(
         content=content,
         created_at=datetime.now(timezone.utc).isoformat(),
         images=list(images or []),
+        steps=list(steps or []),
     )
-    path = chat_history_path(project_id)
+    path = chat_history_path(project_id, create=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as stream:
         stream.write(message.model_dump_json() + "\n")
     return message

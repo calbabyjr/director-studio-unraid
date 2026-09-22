@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from app.core.projects.models import PromptSections
+from typing import Any
+
+from app.core.projects.models import PromptSections, Shot
 
 SECTION_KEYS: list[str] = [
     "subject_definitions",
@@ -279,3 +281,69 @@ def validate_h3_prompt(
         required_picture_indices,
         submitted_picture_indices=submitted_picture_indices,
     )
+
+
+USER_PROMPT_META_KEY = "user_prompt_sections"
+_PICTURE_TAG = re.compile(r"<Picture\s+(\d+)\s*>", re.I)
+_AUDIO_TAG = re.compile(r"<Audio\s+(\d+)\s*>", re.I)
+
+
+def user_locked_prompt_dict(shot: Shot) -> dict[str, str] | None:
+    raw = (shot.meta or {}).get(USER_PROMPT_META_KEY)
+    if not isinstance(raw, dict):
+        return None
+    locked = {
+        key: str(raw.get(key) or "").strip()
+        for key in SECTION_KEYS
+    }
+    if not any(locked.values()):
+        return None
+    return locked
+
+
+def stamp_user_prompt_lock(shot: Shot, sections: PromptSections) -> dict[str, Any]:
+    meta = dict(shot.meta or {})
+    dumped = {key: str(getattr(sections, key, "") or "").strip() for key in SECTION_KEYS}
+    if any(dumped.values()):
+        meta[USER_PROMPT_META_KEY] = dumped
+        meta["prompt_user_edited"] = True
+    else:
+        meta.pop(USER_PROMPT_META_KEY, None)
+        meta["prompt_user_edited"] = False
+    return meta
+
+
+def merge_user_locked_prompt(
+    generated: PromptSections,
+    locked: dict[str, str] | None,
+) -> PromptSections:
+    """Keep Production-tab wording; graft only missing Picture/Audio tags."""
+    if not locked:
+        return generated
+    data = generated.model_dump()
+    for key in SECTION_KEYS:
+        user = str(locked.get(key) or "").strip()
+        if not user:
+            continue
+        gen = str(data.get(key) or "")
+        pics = sorted(
+            set(_PICTURE_TAG.findall(gen)) - set(_PICTURE_TAG.findall(user)),
+            key=int,
+        )
+        auds = sorted(
+            set(_AUDIO_TAG.findall(gen)) - set(_AUDIO_TAG.findall(user)),
+            key=int,
+        )
+        grafts: list[str] = []
+        if pics:
+            grafts.append(
+                "Also bind "
+                + ", ".join(f"<Picture {n}>" for n in pics)
+                + " for the whole clip."
+            )
+        if auds:
+            grafts.append(
+                "Also bind " + ", ".join(f"<Audio {n}>" for n in auds) + "."
+            )
+        data[key] = (user + (" " + " ".join(grafts) if grafts else "")).strip()
+    return PromptSections.model_validate(data)

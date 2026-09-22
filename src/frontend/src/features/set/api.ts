@@ -47,6 +47,7 @@ export interface SceneMetaDefaults {
   default_prepend?: string;
   default_append?: string;
   max_upload_mb: number;
+  max_moge_glb_mb?: number;
   fields?: { id: string; label: string; required?: boolean; hint?: string }[];
   description?: string;
 }

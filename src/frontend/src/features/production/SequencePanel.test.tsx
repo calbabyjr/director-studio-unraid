@@ -3,12 +3,32 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SequencePanel } from "./SequencePanel";
-import { assembleSequence, getSequence } from "./sequenceApi";
+import {
+  assembleSequence,
+  cancelProductionQueue,
+  getProductionQueue,
+  getSequence,
+  startProductionQueue,
+} from "./sequenceApi";
 import type { SequenceReport } from "./sequenceApi";
 
 vi.mock("./sequenceApi", () => ({
   getSequence: vi.fn(),
   assembleSequence: vi.fn(),
+  getProductionQueue: vi.fn(async () => ({
+    project_id: "prj_test",
+    mode: "next",
+    status: "idle",
+    current_shot_id: null,
+    current_job_id: null,
+    pending_shot_ids: [],
+    completed_shot_ids: [],
+    chain_tail_frames: true,
+    error: null,
+    updated_at: "",
+  })),
+  startProductionQueue: vi.fn(),
+  cancelProductionQueue: vi.fn(),
   sequenceExportUrl: (id: string, kind: string) =>
     `/api/projects/${id}/sequence/export/${kind}`,
 }));
@@ -96,6 +116,18 @@ describe("SequencePanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getSequence).mockResolvedValue(report());
+    vi.mocked(getProductionQueue).mockResolvedValue({
+      project_id: "prj_test",
+      mode: "next",
+      status: "idle",
+      current_shot_id: null,
+      current_job_id: null,
+      pending_shot_ids: [],
+      completed_shot_ids: [],
+      chain_tail_frames: true,
+      error: null,
+      updated_at: "",
+    });
   });
 
   it("shows runtime, clip readiness, and export links", async () => {
@@ -148,5 +180,173 @@ describe("SequencePanel", () => {
     await waitFor(() => expect(assembleSequence).toHaveBeenCalledWith("prj_test"));
     expect(await screen.findByText(/skipped 1 shot/)).toBeTruthy();
     expect(screen.getByLabelText("Rough cut")).toBeTruthy();
+  });
+
+  it("rebuilds a stale rough cut when new clips appear", async () => {
+    vi.mocked(assembleSequence).mockResolvedValue({
+      filename: "rough_cut.mp4",
+      url: "/api/files/projects/prj_test/sequence/rough_cut.mp4",
+      duration_s: 12,
+      shot_ids: ["sht_a", "sht_b"],
+      missing_shot_ids: [],
+      clip_job_ids: ["job_1", "job_2"],
+      created_at: "2026-09-22T18:00:00Z",
+    });
+    vi.mocked(getSequence)
+      .mockResolvedValueOnce(
+        report({
+          clips_ready: 2,
+          clips_missing: 0,
+          last_assembly: {
+            filename: "rough_cut.mp4",
+            url: "/api/files/projects/prj_test/sequence/rough_cut.mp4",
+            duration_s: 6,
+            shot_ids: ["sht_a"],
+            missing_shot_ids: ["sht_b"],
+            clip_job_ids: ["job_old"],
+            created_at: "2026-09-22T16:00:00Z",
+          },
+          shots: report().shots.map((shot, index) =>
+            index === 1
+              ? { ...shot, clip_status: "ready", clip_job_id: "job_2", status: "succeeded" }
+              : shot,
+          ),
+        }),
+      )
+      .mockResolvedValue(
+        report({
+          clips_ready: 2,
+          last_assembly: {
+            filename: "rough_cut.mp4",
+            url: "/api/files/projects/prj_test/sequence/rough_cut.mp4",
+            duration_s: 12,
+            shot_ids: ["sht_a", "sht_b"],
+            missing_shot_ids: [],
+            clip_job_ids: ["job_1", "job_2"],
+            created_at: "2026-09-22T18:00:00Z",
+          },
+        }),
+      );
+
+    render(<SequencePanel projectId="prj_test" />);
+    await waitFor(() => expect(assembleSequence).toHaveBeenCalledWith("prj_test"));
+  });
+
+  it("starts the next unfinished shot from the production queue", async () => {
+    vi.mocked(startProductionQueue).mockResolvedValue({
+      project_id: "prj_test",
+      mode: "next",
+      status: "running",
+      current_shot_id: "sht_b",
+      current_job_id: "job_q",
+      pending_shot_ids: [],
+      completed_shot_ids: ["sht_a"],
+      chain_tail_frames: true,
+      error: null,
+      updated_at: "2026-09-22T00:00:00Z",
+    });
+    render(<SequencePanel projectId="prj_test" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run next" }));
+    await waitFor(() =>
+      expect(startProductionQueue).toHaveBeenCalledWith("prj_test", {
+        mode: "next",
+        from_shot_id: "sht_b",
+        chain_tail_frames: true,
+      }),
+    );
+    expect(await screen.findByRole("button", { name: "Stop queue" })).toBeTruthy();
+    expect(screen.getByText(/Queue next · current sht_b/)).toBeTruthy();
+  });
+
+  it("starts remaining unfinished shots and can stop the queue", async () => {
+    vi.mocked(startProductionQueue).mockResolvedValue({
+      project_id: "prj_test",
+      mode: "remaining",
+      status: "running",
+      current_shot_id: "sht_b",
+      current_job_id: "job_q",
+      pending_shot_ids: ["sht_c"],
+      completed_shot_ids: [],
+      chain_tail_frames: true,
+      error: null,
+      updated_at: "2026-09-22T00:00:00Z",
+    });
+    vi.mocked(cancelProductionQueue).mockResolvedValue({
+      project_id: "prj_test",
+      mode: "remaining",
+      status: "idle",
+      current_shot_id: null,
+      current_job_id: null,
+      pending_shot_ids: [],
+      completed_shot_ids: [],
+      chain_tail_frames: true,
+      error: null,
+      updated_at: "2026-09-22T00:00:01Z",
+    });
+    render(<SequencePanel projectId="prj_test" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run remaining" }));
+    await waitFor(() =>
+      expect(startProductionQueue).toHaveBeenCalledWith("prj_test", {
+        mode: "remaining",
+        from_shot_id: "sht_b",
+        chain_tail_frames: true,
+      }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Stop queue" }));
+    await waitFor(() => expect(cancelProductionQueue).toHaveBeenCalledWith("prj_test"));
+    expect(screen.queryByRole("button", { name: "Stop queue" })).toBeNull();
+  });
+
+  it("shows Stop queue while a polled production queue is running", async () => {
+    vi.mocked(getProductionQueue).mockResolvedValue({
+      project_id: "prj_test",
+      mode: "next",
+      status: "running",
+      current_shot_id: "sht_b",
+      current_job_id: "job_q",
+      pending_shot_ids: [],
+      completed_shot_ids: ["sht_a"],
+      chain_tail_frames: true,
+      error: null,
+      updated_at: "2026-09-22T00:00:00Z",
+    });
+    render(<SequencePanel projectId="prj_test" />);
+    expect(await screen.findByRole("button", { name: "Stop queue" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Run next" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Run remaining" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      (screen.getByRole("checkbox", { name: /Chain tail frame into next shot/ }) as HTMLInputElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("sends chain_tail_frames false when the tail-frame toggle is off", async () => {
+    vi.mocked(startProductionQueue).mockResolvedValue({
+      project_id: "prj_test",
+      mode: "next",
+      status: "running",
+      current_shot_id: "sht_b",
+      current_job_id: "job_q",
+      pending_shot_ids: [],
+      completed_shot_ids: ["sht_a"],
+      chain_tail_frames: false,
+      error: null,
+      updated_at: "2026-09-22T00:00:00Z",
+    });
+    render(<SequencePanel projectId="prj_test" />);
+    const toggle = await screen.findByRole("checkbox", {
+      name: /Chain tail frame into next shot/,
+    });
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(toggle);
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Run next" }));
+    await waitFor(() =>
+      expect(startProductionQueue).toHaveBeenCalledWith("prj_test", {
+        mode: "next",
+        from_shot_id: "sht_b",
+        chain_tail_frames: false,
+      }),
+    );
   });
 });

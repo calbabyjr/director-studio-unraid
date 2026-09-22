@@ -1,4 +1,4 @@
-"""Resolve Director H3 clip generations for tail-frame extraction."""
+"""Resolve Director H3 clip generations for tail-frame extraction and sequence assembly."""
 
 from __future__ import annotations
 
@@ -55,12 +55,22 @@ class ResolvedClip:
     path: Path
 
 
-def list_shot_h3_generations(project_id: str, source_shot_id: str) -> list[JobRecord]:
+def list_project_h3_jobs(project_id: str) -> list[JobRecord]:
+    """All H3 jobs for a project (unsorted beyond list_jobs' newest-first)."""
+    return list_jobs(limit=None, pipeline_id=H3_PIPELINE_ID, project_id=project_id)
+
+
+def list_shot_h3_generations(
+    project_id: str,
+    source_shot_id: str,
+    *,
+    jobs: list[JobRecord] | None = None,
+) -> list[JobRecord]:
     """Return H3 jobs for one Director shot, sorted by (created_at, id) ascending."""
-    jobs = list_jobs(limit=None, pipeline_id=H3_PIPELINE_ID, project_id=project_id)
+    pool = jobs if jobs is not None else list_project_h3_jobs(project_id)
     matched = [
         job
-        for job in jobs
+        for job in pool
         if (job.params or {}).get("shot_id") == source_shot_id
     ]
     matched.sort(key=lambda job: (job.created_at, job.id))
@@ -74,6 +84,7 @@ def resolve_source_clip(
     source_version: str | None,
     source_job_id: str | None,
     output_kind: Literal["enhanced", "raw"] | None,
+    generations: list[JobRecord] | None = None,
 ) -> ResolvedClip:
     version = (source_version or "").strip() or None
     job_id = (source_job_id or "").strip() or None
@@ -82,7 +93,8 @@ def resolve_source_clip(
             "clip selector required: supply source_version or source_job_id"
         )
 
-    generations = list_shot_h3_generations(project_id, source_shot_id)
+    if generations is None:
+        generations = list_shot_h3_generations(project_id, source_shot_id)
     if not generations:
         raise ClipGenerationError(
             f"no H3 generations found for shot {source_shot_id} in project {project_id}"
@@ -121,6 +133,40 @@ def resolve_source_clip(
         source_shot_id=source_shot_id,
         source_generation=selected_index,
         output_kind=output_kind,
+    )
+
+
+def resolve_canonical_clip(
+    *,
+    project_id: str,
+    source_shot_id: str,
+    pinned_job_id: str | None = None,
+    output_kind: Literal["enhanced", "raw"] | None = None,
+    generations: list[JobRecord] | None = None,
+) -> ResolvedClip:
+    """Prefer a pinned succeeded H3 take; missing/failed pin falls back to latest."""
+    if generations is None:
+        generations = list_shot_h3_generations(project_id, source_shot_id)
+    pinned = (pinned_job_id or "").strip() or None
+    if pinned:
+        try:
+            return resolve_source_clip(
+                project_id=project_id,
+                source_shot_id=source_shot_id,
+                source_version=None,
+                source_job_id=pinned,
+                output_kind=output_kind,
+                generations=generations,
+            )
+        except ClipGenerationError:
+            pass
+    return resolve_source_clip(
+        project_id=project_id,
+        source_shot_id=source_shot_id,
+        source_version="latest",
+        source_job_id=None,
+        output_kind=output_kind,
+        generations=generations,
     )
 
 

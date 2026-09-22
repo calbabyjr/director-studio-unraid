@@ -391,6 +391,17 @@ class BackendTurn:
         elif _claims_completed_storyboard(reply):
             reply = "No storyboard save was confirmed in this turn."
         images = self.result_images + _layout_images(shots, only_shot_ids=self.touched) if self.touched else self.result_images
+        try:
+            from ...core.projects.director_learning import learn_from_turn
+
+            learn_from_turn(
+                self.project_id,
+                user_message=self.message,
+                assistant_reply=reply,
+                actions=self.actions,
+            )
+        except Exception:
+            pass
         return ChatResult(reply=reply, project=project, shots=shots, actions=self.actions,
                           images=images, thinking=result.get("thinking", ""), steps=self.notes)
 

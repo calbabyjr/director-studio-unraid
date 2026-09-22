@@ -18,13 +18,13 @@ const CATEGORIES: { id: MobileAssetCategory; label: string }[] = [
   { id: "voices", label: "Voices" },
 ];
 
-const IMPORT_ONLY = new Set<Exclude<MobileAssetCategory, "library">>(["costumes", "voices"]);
+const IMPORT_ONLY = new Set<Exclude<MobileAssetCategory, "library">>(["voices"]);
 
 const WORKFLOW_COPY: Record<Exclude<MobileAssetCategory, "library">, { singular: string; description: string }> = {
   actors: { singular: "Actor", description: "Build a reusable character identity and reference sheet." },
   scenes: { singular: "Scene", description: "Build a reusable location with consistent viewing angles." },
   props: { singular: "Prop", description: "Turn a story object into a clean reusable reference." },
-  costumes: { singular: "Costume", description: "Import a wardrobe photo the Director can bind as a Shot Picture." },
+  costumes: { singular: "Costume", description: "Turn a wardrobe still into a clean costume sheet for H3 Pictures." },
   voices: { singular: "Voice", description: "Prepare a clean performance sample for casting and H3." },
 };
 
@@ -57,9 +57,9 @@ export function MobileAssetWorkspace() {
         ))}
       </nav>
 
-      <div hidden={category !== "library"}>
+      {category === "library" ? (
         <MobileLibraryOverview onSelectKind={setCategory} />
-      </div>
+      ) : null}
       {CATEGORIES.filter((item) => item.id !== "library").map((item) => {
         const workflowCategory = item.id as Exclude<MobileAssetCategory, "library">;
         return (
@@ -91,6 +91,7 @@ export function MobileAssetWorkspace() {
               {workflowCategory === "actors" ? <CastingPage onOpenLibrary={() => setCategory("library")} /> : null}
               {workflowCategory === "scenes" ? <SetDesignPage onOpenLibrary={() => setCategory("library")} /> : null}
               {workflowCategory === "props" ? <PropsPage onOpenLibrary={() => setCategory("library")} /> : null}
+              {workflowCategory === "costumes" ? <PropsPage kind="costume" onOpenLibrary={() => setCategory("library")} /> : null}
             </section>
           )}
         </div>

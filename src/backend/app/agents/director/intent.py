@@ -28,6 +28,31 @@ def material_review_target_shot_id(message: str) -> str | None:
     return match.group(1) if match else None
 
 
+def explicit_h3_generation_intent(message: str) -> bool:
+    """Require an affirmative request before offering H3 clip generation."""
+    text = normalize_text(message)
+    if re.search(
+        r"(?:do not|don't|dont|not yet)\s+(?:queue|generate|create|render)|"
+        r"(?:不要|先别|暂不|别)\s*(?:生成|创建|排队)",
+        text,
+        flags=re.I,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:generate|queue|render|submit|run)\b.{0,48}\b(?:h3|clip|video)\b",
+            text,
+            flags=re.I,
+        )
+        or re.search(
+            r"\b(?:move to|start|go ahead with)\b.{0,24}\b(?:generat|h3)\b",
+            text,
+            flags=re.I,
+        )
+        or "generating h3" in text
+    )
+
+
 def explicit_layout_generation_intent(message: str) -> bool:
     """Require an affirmative current-turn request before offering Layout generation."""
     text = normalize_text(message)

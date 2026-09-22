@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../../shared/api/types";
+import { listLibraryAssets } from "../library/api";
 import { MobileAssetWorkspace } from "./MobileAssetWorkspace";
 
 const state = vi.hoisted(() => ({
@@ -23,6 +24,8 @@ vi.mock("../library/LibraryPage", () => ({
 vi.mock("../library/api", () => ({
   importExternalAsset: vi.fn(),
   recastLibraryAsset: vi.fn(),
+  listActorTakes: vi.fn(async () => ({ items: [] })),
+  pinActorTake: vi.fn(),
   listLibraryAssets: vi.fn(async (kind: string) => kind === "actors" ? [{
     id: "actor_1", kind: "actors", name: "Mara", notes: "Lead", pipeline_id: "external",
     job_id: "", seed: null, created_at: "2026-01-01", files: {}, meta: {},
@@ -33,7 +36,11 @@ vi.mock("../casting/CastingPage", () => ({
   CastingPage: () => <label>Actor generator<input aria-label="Mobile actor draft" /></label>,
 }));
 vi.mock("../set/SetDesignPage", () => ({ SetDesignPage: () => <div>Scene generator</div> }));
-vi.mock("../props/PropsPage", () => ({ PropsPage: () => <div>Prop generator</div> }));
+vi.mock("../props/PropsPage", () => ({
+  PropsPage: ({ kind }: { kind?: string }) => (
+    <div>{kind === "costume" ? "Costume generator" : "Prop generator"}</div>
+  ),
+}));
 
 describe("MobileAssetWorkspace", () => {
   afterEach(cleanup);
@@ -57,6 +64,35 @@ describe("MobileAssetWorkspace", () => {
     expect(screen.queryByTestId("mobile-library")).toBeNull();
   });
 
+  it("reloads the project library after saving from a mobile preparation workflow", async () => {
+    const mara = {
+      id: "actor_1", kind: "actors", name: "Mara", notes: "Lead", pipeline_id: "actor",
+      job_id: "job_1", seed: null, created_at: "2026-01-01", files: {}, meta: {},
+      urls: { master: "/mara.png" }, project_id: "prj_1",
+    };
+    let actors: typeof mara[] = [];
+    vi.mocked(listLibraryAssets).mockImplementation(async (kind: string) =>
+      kind === "actors" ? actors : [],
+    );
+    render(<MobileAssetWorkspace />);
+
+    await waitFor(() => expect(listLibraryAssets).toHaveBeenCalled());
+    expect(screen.queryByText("Mara")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Actors" }));
+    actors = [mara];
+    fireEvent.click(screen.getByRole("button", { name: "Library" }));
+
+    expect(await screen.findByText("Mara")).toBeTruthy();
+    vi.mocked(listLibraryAssets).mockImplementation(async (kind: string) =>
+      kind === "actors" ? [{
+        id: "actor_1", kind: "actors", name: "Mara", notes: "Lead", pipeline_id: "external",
+        job_id: "", seed: null, created_at: "2026-01-01", files: {}, meta: {},
+        urls: { master: "/mara.png" }, project_id: "prj_1",
+      }] : [],
+    );
+  });
+
   it("shows the preparation input directly without a category library", () => {
     render(<MobileAssetWorkspace />);
 
@@ -73,6 +109,7 @@ describe("MobileAssetWorkspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Costumes" }));
     expect(screen.getByRole("heading", { name: "Costume workflow" })).toBeTruthy();
+    expect(screen.getByText("Costume generator")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Import costume" })).toBeTruthy();
     expect(screen.queryByTestId("mobile-library")).toBeNull();
   });

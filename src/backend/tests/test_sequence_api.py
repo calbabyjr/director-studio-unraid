@@ -124,3 +124,32 @@ def test_assemble_without_clips_is_400(client):
 def test_unknown_project_is_404(client):
     response = client.get("/api/projects/prj_missing/sequence")
     assert response.status_code == 404
+
+
+def test_production_queue_cancel_cancels_inflight_job(client, monkeypatch):
+    from app.core.projects.shot_queue import ProductionQueue, save_queue
+
+    project_id = _seed(client)
+    save_queue(
+        ProductionQueue(
+            project_id=project_id,
+            mode="remaining",
+            status="running",
+            current_shot_id="sht_entry",
+            current_job_id="job_h3_run",
+            pending_shot_ids=["sht_entry"],
+        )
+    )
+    cancelled: list[str] = []
+
+    async def fake_cancel(job_id: str):
+        cancelled.append(job_id)
+        return None
+
+    monkeypatch.setattr("app.core.jobs.cancel_job", fake_cancel)
+    response = client.post(f"/api/projects/{project_id}/production/queue/cancel")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "idle"
+    assert body["current_job_id"] is None
+    assert cancelled == ["job_h3_run"]

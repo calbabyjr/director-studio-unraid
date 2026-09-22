@@ -25,8 +25,16 @@ def _inventory(project_id: str | None = None) -> list[dict[str, Any]]:
             continue
         for asset in list_assets(kind, project_id=project_id, include_unassigned=True):
             files = dict(asset.files or {})
-            file_keys = [key for key, value in files.items() if value]
-            filenames = [str(value) for value in files.values() if value]
+            file_keys = [
+                key
+                for key, value in files.items()
+                if value and not str(key).startswith("voice")
+            ]
+            filenames = [
+                str(value)
+                for key, value in files.items()
+                if value and not str(key).startswith("voice")
+            ]
             meta = asset.meta or {}
             source_filename = str(meta.get("source_filename") or "")
             if source_filename and source_filename not in filenames:
@@ -55,6 +63,12 @@ def _inventory(project_id: str | None = None) -> list[dict[str, Any]]:
                     "h3_ready": bool(meta.get("h3_ready"))
                     if kind == "voices"
                     else None,
+                    "linked_voice_ids": (
+                        [str(item) for item in (meta.get("linked_voice_ids") or []) if item]
+                        if kind == "actors"
+                        else []
+                    ),
+                    "actor_id": meta.get("actor_id") if kind == "voices" else None,
                 }
             )
     return items

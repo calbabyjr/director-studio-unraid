@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -132,6 +133,56 @@ def _write_asset(asset: LibraryAsset) -> None:
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+
+
+_FILE_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+MAX_ASSET_FILES = 16
+MAX_VOICE_SAMPLES = 8
+
+
+def add_asset_file(
+    kind: str,
+    asset_id: str,
+    *,
+    data: bytes,
+    filename: str,
+    file_key: str | None = None,
+) -> LibraryAsset:
+    """Attach another image to an existing library asset."""
+    asset = load_asset(kind, asset_id)
+    if asset is None:
+        raise ValueError(f"asset not found: {kind}/{asset_id}")
+    if kind == "voices":
+        raise ValueError("cannot attach images to a Voice asset")
+    if len(asset.files or {}) >= MAX_ASSET_FILES:
+        raise ValueError(f"at most {MAX_ASSET_FILES} files per asset")
+    suffix = Path(filename or "image.png").suffix.lower()
+    if suffix not in _IMAGE_SUFFIXES:
+        suffix = ".png"
+    raw_key = (file_key or Path(filename).stem or "extra").strip().lower()
+    raw_key = re.sub(r"[^a-z0-9]+", "_", raw_key).strip("_") or "extra"
+    if not _FILE_KEY_RE.match(raw_key):
+        raw_key = "extra"
+    key = raw_key
+    n = 2
+    while key in (asset.files or {}):
+        key = f"{raw_key}_{n}"
+        n += 1
+        if n > 40:
+            raise ValueError("could not allocate a unique file key")
+    dest_name = f"{key}{suffix}"
+    adir = asset_write_dir(kind, asset_id, project_id=asset.project_id)
+    adir.mkdir(parents=True, exist_ok=True)
+    (adir / dest_name).write_bytes(data)
+    files = dict(asset.files or {})
+    files[key] = dest_name
+    meta = dict(asset.meta or {})
+    extra = list(meta.get("extra_views") or [])
+    extra.append({"key": key, "source_filename": filename})
+    meta["extra_views"] = extra
+    updated = asset.model_copy(update={"files": files, "meta": meta})
+    return write_asset(updated)
 
 
 def write_asset(asset: LibraryAsset) -> LibraryAsset:
@@ -386,6 +437,96 @@ def create_external_voice_asset(
     except Exception:
         if adir.exists():
             shutil.rmtree(adir)
+        raise
+
+
+def _unique_file_key(files: dict[str, str | None], raw_key: str) -> str:
+    key = raw_key
+    n = 2
+    while key in files:
+        key = f"{raw_key}_{n}"
+        n += 1
+        if n > 40:
+            raise ValueError("could not allocate a unique file key")
+    return key
+
+
+def _next_actor_voice_name(actor: LibraryAsset) -> str:
+    samples = list((actor.meta or {}).get("voice_samples") or [])
+    base = (actor.name or "Actor").strip() or "Actor"
+    n = len(samples) + 1
+    if n == 1:
+        return f"{base} voice"
+    return f"{base} voice {n}"
+
+
+def add_actor_voice_sample(
+    actor_id: str,
+    *,
+    audio_bytes: bytes,
+    audio_filename: str,
+    name: str | None = None,
+    notes: str = "",
+) -> LibraryAsset:
+    """Attach a voice sample to an Actor and create a linked H3-ready Voice asset."""
+    actor = load_asset("actors", actor_id)
+    if actor is None:
+        raise ValueError(f"asset not found: actors/{actor_id}")
+    meta = dict(actor.meta or {})
+    samples = list(meta.get("voice_samples") or [])
+    if len(samples) >= MAX_VOICE_SAMPLES:
+        raise ValueError(f"at most {MAX_VOICE_SAMPLES} voice samples per actor")
+    if len(actor.files or {}) >= MAX_ASSET_FILES:
+        raise ValueError(f"at most {MAX_ASSET_FILES} files per asset")
+
+    voice_name = (name or "").strip() or _next_actor_voice_name(actor)
+    voice = create_external_voice_asset(
+        name=voice_name,
+        notes=(notes or "").strip(),
+        project_id=actor.project_id,
+        audio_bytes=audio_bytes,
+        audio_filename=audio_filename,
+        source_filename=audio_filename,
+    )
+    try:
+        voice_meta = dict(voice.meta or {})
+        voice_meta["actor_id"] = actor.id
+        voice_meta["actor_name"] = actor.name
+        voice = write_asset(voice.model_copy(update={"meta": voice_meta}))
+
+        files = dict(actor.files or {})
+        key = _unique_file_key(files, "voice")
+        dest_name = f"{key}.wav"
+        adir = asset_write_dir("actors", actor.id, project_id=actor.project_id)
+        adir.mkdir(parents=True, exist_ok=True)
+        voice_dir = asset_write_dir("voices", voice.id, project_id=voice.project_id)
+        reference_name = (voice.files or {}).get("reference") or "reference.wav"
+        reference_path = voice_dir / reference_name
+        if not reference_path.is_file():
+            raise ValueError(f"Voice reference file not found: {voice.id}")
+        shutil.copy2(reference_path, adir / dest_name)
+        files[key] = dest_name
+
+        linked = [str(item) for item in (meta.get("linked_voice_ids") or []) if item]
+        if voice.id not in linked:
+            linked.append(voice.id)
+        samples.append(
+            {
+                "key": key,
+                "voice_id": voice.id,
+                "source_filename": audio_filename,
+                "duration_s": voice_meta.get("duration_s"),
+                "h3_ready": True,
+            }
+        )
+        meta["linked_voice_ids"] = linked
+        meta["voice_samples"] = samples
+        return write_asset(actor.model_copy(update={"files": files, "meta": meta}))
+    except Exception:
+        try:
+            delete_asset("voices", voice.id)
+        except ValueError:
+            pass
         raise
 
 

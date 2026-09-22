@@ -13,6 +13,8 @@ from ...config import settings
 from ...core.jobs import create_job, load_job, start_pipeline_job
 from ...core.library.store import load_asset
 from ...core.h3.prompt import (
+    merge_user_locked_prompt,
+    user_locked_prompt_dict,
     validate_h3_prompt,
     validate_required_picture_bindings,
     validate_tail_frame_transition_prompt,
@@ -1946,6 +1948,14 @@ class DirectorService:
         voice_refs_json = json.dumps(prompt_voice_refs, ensure_ascii=False)
 
         keep = bool(getattr(settings, "llm_keep_loaded", True))
+        locked_prompt = user_locked_prompt_dict(shot)
+        human_edited_prompt = (
+            "HUMAN-EDITED PROMPT from Production. Preserve this wording. "
+            "Only add missing <Picture N> or <Audio N> tags required by the current refs:\n"
+            + json.dumps(locked_prompt, ensure_ascii=False)
+            if locked_prompt
+            else ""
+        )
         async with self.orchestrator.llm_session(release_on_exit=not keep):
             await self.orchestrator.ensure_llm_ready()
             user = prompt_text.PROMPT_SECTIONS_USER_TEMPLATE.format(
@@ -1963,9 +1973,12 @@ class DirectorService:
                 voice_refs_json=voice_refs_json,
                 layout_asset_id=selected_layout_asset_id,
                 feedback=shot.feedback or "",
+                human_edited_prompt=human_edited_prompt,
                 context_json=context_json,
             )
             preserve_prompt = bool(decision and not decision["rewrite_prompt"] and decision["brief"] is None)
+            if locked_prompt:
+                preserve_prompt = True
             if preserve_prompt:
                 try:
                     validate_h3_prompt(shot.prompt_sections.as_ordered_text(), shot.dialogue,
@@ -1989,8 +2002,23 @@ class DirectorService:
             ]
 
             def parse_and_validate(value: str) -> PromptSections:
-                parsed = PromptSections(**parse_prompt_sections_json(value))
+                existing = shot.prompt_sections
+                fallback = {
+                    key: str(getattr(existing, key, "") or "")
+                    for key in (
+                        "subject_definitions",
+                        "summary",
+                        "retention_analysis",
+                        "detailed_description",
+                        "overall_soundscape",
+                        "non_diegetic_music",
+                    )
+                } if existing is not None else None
+                parsed = PromptSections(
+                    **parse_prompt_sections_json(value, fallback=fallback)
+                )
                 parsed = _apply_source_audio_contract(parsed, shot)
+                parsed = merge_user_locked_prompt(parsed, locked_prompt)
                 ordered_text = parsed.as_ordered_text()
                 validate_tail_frame_transition_prompt(parsed, selected_layouts)
                 validate_h3_prompt(ordered_text, shot.dialogue,

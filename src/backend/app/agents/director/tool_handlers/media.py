@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from ....core.h3 import compose_h3_prompt, frames_for_seconds, validate_h3_prompt
+from ....core.h3.images import collect_h3_images
+from ....core.jobs import create_job
 from ....core.media.clip_generations import ClipGenerationAmbiguous
 from ....core.media import sequence, tail_frame
+from ....core.projects.layouts import selected_layout_prompt_context
 from ....core.projects.models import Project, Shot
-from ....core.projects.store import load_shot
-from ..intent import material_review_target_shot_id
+from ....core.projects.store import load_project, load_shot, save_shot
+from ....core.projects.transitions import apply_transition, assert_h3_submittable
+from ..intent import material_review_target_shot_id, resolve_shot
 
 
 async def handle_media_tool(
@@ -26,6 +31,76 @@ async def handle_media_tool(
     images: list[Any] | None,
     user_feedback: str,
 ) -> bool:
+    if name == "queue_h3":
+        targets: list[Shot] = []
+        if args.get("all"):
+            targets = list(shots)
+        else:
+            shot = resolve_shot(
+                shots,
+                shot_id=args.get("shot_id"),
+                shot_index=args.get("shot_index") or args.get("index"),
+                title=args.get("title"),
+            )
+            if shot:
+                targets = [shot]
+            elif len(shots) == 1:
+                targets = [shots[0]]
+        if not targets:
+            notes.append("queue_h3: specify a shot or all=true")
+            return True
+        queued = 0
+        for shot in targets:
+            try:
+                assert_h3_submittable(shot)
+                prompt_text = compose_h3_prompt(shot.prompt_sections)
+                selected_layouts = selected_layout_prompt_context(shot)
+                required_layout_indices = [
+                    int(item["picture_index"]) for item in selected_layouts
+                ]
+                validate_h3_prompt(
+                    prompt_text,
+                    list(shot.dialogue),
+                    audio_count=len(shot.voice_refs),
+                    required_picture_indices=required_layout_indices,
+                    submitted_picture_indices=(ref.picture_index for ref in shot.refs),
+                )
+                frames = frames_for_seconds(shot.duration_s)
+                images = collect_h3_images(shot)
+                job = create_job(
+                    pipeline_id="h3_ref2va",
+                    asset_kind="productions",
+                    name=f"h3:{shot.title}",
+                    notes=shot.script_beat,
+                    params={
+                        "prompt": prompt_text,
+                        "dialogue": list(shot.dialogue),
+                        "frames": frames,
+                        "duration_s": shot.duration_s,
+                        "image_keys": list(images.keys()),
+                        "shot_id": shot.id,
+                        "project_id": shot.project_id,
+                        "shot_title": shot.title,
+                    },
+                    project_id=shot.project_id,
+                )
+                await runtime.start_pipeline_job(job, images=images or None)
+                updated = apply_transition(shot, "submit_h3")
+                updated = updated.model_copy(update={"h3_job_id": job.id})
+                save_shot(updated)
+                actions.append(f"queue_h3:{shot.id}:{job.id}")
+                notes.append(f"Queued H3 for **{shot.title}** as `{job.id}`.")
+                if result_payloads is not None:
+                    result_payloads.append({"ok": True, "shot_id": shot.id, "job_id": job.id})
+                touched.add(shot.id)
+                queued += 1
+            except Exception as exc:
+                notes.append(f"queue_h3 failed for {shot.title}: {exc}")
+                if result_payloads is not None:
+                    result_payloads.append({"ok": False, "shot_id": shot.id, "error": str(exc)})
+        if queued == 0 and targets:
+            notes.append("No H3 jobs started. Fix the errors above, then retry queue_h3.")
+        return True
     if name in {"get_status", "status"}:
         shot_id = args.get("shot_id")
         if shot_id:

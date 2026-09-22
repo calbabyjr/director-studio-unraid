@@ -102,6 +102,7 @@ async def execute_tools(
     notes: list[str] = []
     touched: set[str] = set()
     prompt_written_shot_ids: set[str] = set()
+    prompt_failed_shot_ids: set[str] = set()
     budget = storyboard_budget or runtime.storyboard_budget_factory()
     storyboard_save_failed = False
 
@@ -112,7 +113,9 @@ async def execute_tools(
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
-        args = item.get("args") if isinstance(item.get("args"), dict) else {}
+        from .tool_args import coerce_tool_args
+
+        args = coerce_tool_args(item.get("args"))
         shots = refresh_shots()
         project = load_project(project_id)
         if project is None:
@@ -223,6 +226,7 @@ async def execute_tools(
                 notes=notes,
                 touched=touched,
                 prompt_written_shot_ids=prompt_written_shot_ids,
+                prompt_failed_shot_ids=prompt_failed_shot_ids,
                 result_payloads=result_payloads,
                 images=images,
                 user_feedback=user_feedback,
@@ -260,6 +264,17 @@ async def execute_tools(
         except Exception as e:
             logger.exception("tool %s failed", name)
             notes.append(f"{name} failed: {e}")
+            await runtime.emit(on_progress, "status", f"{name} failed: {e}")
+            try:
+                from ...core.projects.director_reflection import reflect_on_tool_failure
+
+                reflect_on_tool_failure(
+                    project_id=project_id,
+                    tool_name=name,
+                    error=str(e),
+                )
+            except Exception:
+                logger.exception("director tool reflection failed for %s", name)
             failure: dict[str, Any] = {"ok": False, "error": str(e)}
             if name == "queue_gpt_ref_frame":
                 failure.update(

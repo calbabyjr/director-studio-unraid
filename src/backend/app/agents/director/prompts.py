@@ -204,6 +204,8 @@ PROMPT_SECTIONS_USER_TEMPLATE = """Shot:
 - layout_asset_id: {layout_asset_id}
 - human feedback: {feedback}
 
+{human_edited_prompt}
+
 Agent context snapshot:
 {context_json}
 

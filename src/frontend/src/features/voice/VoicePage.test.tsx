@@ -15,6 +15,8 @@ vi.mock("../library/api", () => ({
   deleteLibraryAsset: vi.fn(),
   recastLibraryAsset: vi.fn(),
   updateLibraryAsset: vi.fn(),
+  addLibraryAssetFile: vi.fn(),
+  addActorVoiceSample: vi.fn(),
 }));
 
 const voiceAsset = {

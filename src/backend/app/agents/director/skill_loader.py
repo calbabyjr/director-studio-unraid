@@ -44,17 +44,25 @@ def with_director_skill(
     *,
     guides: Iterable[str] = (),
     soul_id: str | None = None,
+    project_id: str | None = None,
 ) -> str:
     """Put the live Director contract before task-specific instructions."""
     from ...core.souls.context import active_soul_id
     from ...core.souls.store import soul_prompt_blocks
+    from ...core.workspace.context import active_workspace_project_id
+    from ...core.workspace.store import workspace_prompt_blocks
 
     core_block = (
         "<DIRECTOR_SKILL>\n"
         f"{load_director_skill()}\n"
         "</DIRECTOR_SKILL>"
     )
-    soul_block = soul_prompt_blocks(soul_id or active_soul_id())
+    active = soul_id or active_soul_id()
+    workspace_block = workspace_prompt_blocks(
+        project_id or active_workspace_project_id(),
+        soul_id=active,
+    )
+    soul_block = soul_prompt_blocks(active)
     stage_blocks = load_stage_guides(guides)
     task_block = (
         "<TASK_INSTRUCTIONS>\n"
@@ -62,5 +70,7 @@ def with_director_skill(
         "</TASK_INSTRUCTIONS>"
     )
     return "\n\n".join(
-        block for block in (core_block, soul_block, stage_blocks, task_block) if block
+        block
+        for block in (core_block, workspace_block, soul_block, stage_blocks, task_block)
+        if block
     )

@@ -177,6 +177,17 @@ def test_list_shot_h3_generations_orders_and_filters(jobs_dir):
     assert [j.id for j in gens] == [early.id, mid.id, late.id]
 
 
+def test_list_jobs_returns_newest_first(jobs_dir):
+    from app.core.jobs.store import list_jobs
+
+    older = _h3_job(project_id=PROJECT_ID, shot_id=SHOT_A, name="older")
+    _materialize(older, created_at="2026-08-01T10:00:00+00:00", outputs={"video": "video.mp4"})
+    newer = _h3_job(project_id=PROJECT_ID, shot_id=SHOT_A, name="newer")
+    _materialize(newer, created_at="2026-08-01T12:00:00+00:00", outputs={"video": "video.mp4"})
+    listed = list_jobs(limit=1, pipeline_id="h3_ref2va", project_id=PROJECT_ID)
+    assert listed[0].id == newer.id
+
+
 def test_resolve_latest_v2_numeric_and_job_id(jobs_dir):
     from app.core.media.clip_generations import resolve_source_clip
 
@@ -387,6 +398,109 @@ def test_output_kind_preference_fallback_and_explicit(jobs_dir):
             source_job_id=None,
             output_kind="enhanced",
         )
+
+
+def test_resolve_canonical_clip_prefers_pinned_succeeded_take(jobs_dir):
+    from app.core.media.clip_generations import (
+        ClipGenerationAmbiguous,
+        resolve_canonical_clip,
+        resolve_source_clip,
+    )
+
+    older = _h3_job(project_id=PROJECT_ID, shot_id=SHOT_A, name="v1")
+    _materialize(
+        older,
+        created_at="2026-08-01T10:00:00+00:00",
+        outputs={"video": "take1.mp4"},
+    )
+    newer = _h3_job(project_id=PROJECT_ID, shot_id=SHOT_A, name="v2")
+    _materialize(
+        newer,
+        created_at="2026-08-01T11:00:00+00:00",
+        outputs={"video": "take2.mp4"},
+    )
+
+    latest = resolve_source_clip(
+        project_id=PROJECT_ID,
+        source_shot_id=SHOT_A,
+        source_version="latest",
+        source_job_id=None,
+        output_kind=None,
+    )
+    assert latest.source_job_id == newer.id
+
+    pinned = resolve_canonical_clip(
+        project_id=PROJECT_ID,
+        source_shot_id=SHOT_A,
+        pinned_job_id=older.id,
+    )
+    assert pinned.source_job_id == older.id
+    assert pinned.source_filename == "take1.mp4"
+
+    failed_newer = _h3_job(project_id=PROJECT_ID, shot_id=SHOT_A, name="v3-fail")
+    _materialize(
+        failed_newer,
+        status=JobStatus.failed,
+        created_at="2026-08-01T12:00:00+00:00",
+    )
+    with pytest.raises(ClipGenerationAmbiguous):
+        resolve_source_clip(
+            project_id=PROJECT_ID,
+            source_shot_id=SHOT_A,
+            source_version="latest",
+            source_job_id=None,
+            output_kind=None,
+        )
+    still_pinned = resolve_canonical_clip(
+        project_id=PROJECT_ID,
+        source_shot_id=SHOT_A,
+        pinned_job_id=older.id,
+    )
+    assert still_pinned.source_job_id == older.id
+
+
+def test_resolve_canonical_clip_falls_back_when_pin_missing_or_failed(jobs_dir):
+    from app.core.media.clip_generations import resolve_canonical_clip
+
+    older = _h3_job(project_id=PROJECT_ID, shot_id=SHOT_A, name="v1")
+    _materialize(
+        older,
+        created_at="2026-08-01T10:00:00+00:00",
+        outputs={"video": "take1.mp4"},
+    )
+    newer = _h3_job(project_id=PROJECT_ID, shot_id=SHOT_A, name="v2")
+    _materialize(
+        newer,
+        created_at="2026-08-01T11:00:00+00:00",
+        outputs={"video": "take2.mp4"},
+    )
+    failed_pin = _h3_job(project_id=PROJECT_ID, shot_id=SHOT_A, name="failed-pin")
+    _materialize(
+        failed_pin,
+        status=JobStatus.failed,
+        created_at="2026-08-01T09:00:00+00:00",
+    )
+
+    from_missing = resolve_canonical_clip(
+        project_id=PROJECT_ID,
+        source_shot_id=SHOT_A,
+        pinned_job_id="job_does_not_exist",
+    )
+    assert from_missing.source_job_id == newer.id
+
+    from_failed = resolve_canonical_clip(
+        project_id=PROJECT_ID,
+        source_shot_id=SHOT_A,
+        pinned_job_id=failed_pin.id,
+    )
+    assert from_failed.source_job_id == newer.id
+
+    unpinned = resolve_canonical_clip(
+        project_id=PROJECT_ID,
+        source_shot_id=SHOT_A,
+        pinned_job_id=None,
+    )
+    assert unpinned.source_job_id == newer.id
 
 
 def test_rejects_succeeded_job_with_missing_output_file(jobs_dir):

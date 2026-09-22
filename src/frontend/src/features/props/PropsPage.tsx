@@ -5,10 +5,15 @@ import { OutputGrid } from "../../shared/components/OutputGrid";
 import type { OutputSlot } from "../../shared/api/types";
 import { useProject } from "../../shared/project/ProjectContext";
 import {
+  cancelCostumeJob,
   cancelPropJob,
+  generateCostume,
   generateProp,
+  getCostumeJob,
   getPropJob,
+  listCostumeJobs,
   listPropJobs,
+  saveCostumeJob,
   savePropJob,
   type JobStatus,
   type PropJobRecord,
@@ -17,13 +22,15 @@ import {
 
 const ACTIVE: JobStatus[] = ["queued", "uploading", "running"];
 
-const MASTER_LABELS = { master: "Prop Reference Sheet" };
+const MASTER_LABELS = { master: "Reference Sheet" };
 
 interface Props {
   onOpenLibrary: () => void;
+  kind?: "prop" | "costume";
 }
 
-export function PropsPage({ onOpenLibrary }: Props) {
+export function PropsPage({ onOpenLibrary, kind = "prop" }: Props) {
+  const isCostume = kind === "costume";
   const { projectId, project } = useProject();
 
   const [name, setName] = useState("");
@@ -54,7 +61,7 @@ export function PropsPage({ onOpenLibrary }: Props) {
     setLightbox(null);
     if (!projectId) return;
     let cancelled = false;
-    listPropJobs(projectId, 15)
+    (isCostume ? listCostumeJobs : listPropJobs)(projectId, 15)
       .then((jobs) => {
         if (cancelled) return;
         const active = jobs.find((j) => ACTIVE.includes(j.status));
@@ -66,12 +73,12 @@ export function PropsPage({ onOpenLibrary }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, isCostume]);
 
   useEffect(() => {
     if (!job || !ACTIVE.includes(job.status)) return;
     const t = window.setInterval(() => {
-      getPropJob(job.id)
+      (isCostume ? getCostumeJob : getPropJob)(job.id)
         .then(setJob)
         .catch((e) => setFormError(String(e)));
     }, 1500);
@@ -84,7 +91,7 @@ export function PropsPage({ onOpenLibrary }: Props) {
   const validate = (): boolean => {
     const err: Record<string, string> = {};
     if (!name.trim()) err.name = "Name is required";
-    if (!propImg) err.prop = "Prop photo is required";
+    if (!propImg) err.prop = isCostume ? "Costume photo is required" : "Prop photo is required";
     if (fixedSeed && seed && Number.isNaN(Number(seed))) err.seed = "Seed must be an integer";
     setFieldErrors(err);
     return Object.keys(err).length === 0;
@@ -94,7 +101,11 @@ export function PropsPage({ onOpenLibrary }: Props) {
     setFormError(null);
     setSaved(null);
     if (!projectId) {
-      setFormError("Select a project in the header first — props belong to a project.");
+      setFormError(
+        isCostume
+          ? "Select a project in the header first — costumes belong to a project."
+          : "Select a project in the header first — props belong to a project.",
+      );
       return;
     }
     if (!validate()) return;
@@ -106,8 +117,10 @@ export function PropsPage({ onOpenLibrary }: Props) {
       fd.set("fixed_seed", fixedSeed ? "true" : "false");
       fd.set("project_id", projectId);
       if (fixedSeed && seed.trim()) fd.set("seed", seed.trim());
-      if (propImg) fd.set("prop_image", propImg.file, propImg.file.name);
-      setJob(await generateProp(fd));
+      if (propImg) {
+        fd.set(isCostume ? "costume_image" : "prop_image", propImg.file, propImg.file.name);
+      }
+      setJob(await (isCostume ? generateCostume : generateProp)(fd));
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -118,7 +131,7 @@ export function PropsPage({ onOpenLibrary }: Props) {
   const onCancel = async () => {
     if (!job) return;
     try {
-      setJob(await cancelPropJob(job.id));
+      setJob(await (isCostume ? cancelCostumeJob : cancelPropJob)(job.id));
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
     }
@@ -127,12 +140,16 @@ export function PropsPage({ onOpenLibrary }: Props) {
   const onSave = async () => {
     if (!job || job.status !== "succeeded") return;
     if (!projectId) {
-      setFormError("Select a project in the header — props must belong to a project.");
+      setFormError(
+        isCostume
+          ? "Select a project in the header — costumes must belong to a project."
+          : "Select a project in the header — props must belong to a project.",
+      );
       return;
     }
     setBusy(true);
     try {
-      const record = await savePropJob(job.id, {
+      const record = await (isCostume ? saveCostumeJob : savePropJob)(job.id, {
         name: name.trim(),
         notes,
         project_id: projectId,
@@ -178,18 +195,22 @@ export function PropsPage({ onOpenLibrary }: Props) {
     <>
       <main className="workspace">
         <section className="panel input-panel">
-          <h2>Props · Reference Sheet</h2>
+          <h2>{isCostume ? "Costumes · Wardrobe Sheet" : "Props · Reference Sheet"}</h2>
           {projectId ? (
             <p className="project-scope-hint">
               Saving to project <strong>{project?.name || projectId}</strong>
             </p>
           ) : (
-            <div className="banner error">Select a project in the header before preparing props.</div>
+            <div className="banner error">
+              {isCostume
+                ? "Select a project in the header before preparing costumes."
+                : "Select a project in the header before preparing props."}
+            </div>
           )}
           <p className="field-hint" style={{ marginBottom: "1rem" }}>
-            Upload one photo. Director Studio creates one multi-view reference sheet: the same
-            prop in a large hero view and supporting angles, on a neutral studio background.
-            H3 receives the finished sheet as one picture reference.
+            {isCostume
+              ? "Upload one wardrobe photo. Director Studio creates a multi-view costume sheet: the same outfit in a large hero view and supporting angles, on a neutral studio background. H3 receives the finished sheet as one picture reference."
+              : "Upload one photo. Director Studio creates one multi-view reference sheet: the same prop in a large hero view and supporting angles, on a neutral studio background. H3 receives the finished sheet as one picture reference."}
           </p>
 
           <div className="block">
@@ -202,7 +223,7 @@ export function PropsPage({ onOpenLibrary }: Props) {
                 value={name}
                 disabled={isRunning}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Folding knife"
+                placeholder={isCostume ? "e.g. Red evening gown" : "e.g. Folding knife"}
               />
               {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
             </label>
@@ -220,9 +241,13 @@ export function PropsPage({ onOpenLibrary }: Props) {
           <div className="block">
             <div className="block-title">2. Photo</div>
             <ImageUploadSlot
-              label="Prop photo"
+              label={isCostume ? "Costume photo" : "Prop photo"}
               required
-              hint="Phone snap, catalog still, or generated object. One object, as complete as possible."
+              hint={
+                isCostume
+                  ? "Phone snap, catalog still, or generated wardrobe. One garment, as complete as possible."
+                  : "Phone snap, catalog still, or generated object. One object, as complete as possible."
+              }
               value={propImg}
               onChange={setPropImg}
               disabled={isRunning}
@@ -266,7 +291,7 @@ export function PropsPage({ onOpenLibrary }: Props) {
           <div className="actions">
             {!isRunning ? (
               <button type="button" className="btn primary" disabled={busy} onClick={onGenerate}>
-                {busy ? "Submitting…" : "Prepare Reference Sheet"}
+                {busy ? "Submitting…" : isCostume ? "Generate Costume" : "Generate Prop"}
               </button>
             ) : (
               <button type="button" className="btn danger" onClick={onCancel}>
@@ -281,7 +306,7 @@ export function PropsPage({ onOpenLibrary }: Props) {
 
         <section className="panel output-panel">
           <div className="output-header">
-            <h2>Output</h2>
+            <h2>{isCostume ? "Costume" : "Output"}</h2>
             <div className={`status-pill status-${status}`}>
               <span className="dot" />
               {statusLabel}
@@ -291,8 +316,9 @@ export function PropsPage({ onOpenLibrary }: Props) {
 
           {!job ? (
             <p className="empty-copy">
-              The prepared reference sheet appears here. Save it to the library so Director can
-              cast its complete multi-view object information as a single H3 picture.
+              {isCostume
+                ? "The costume sheet appears here. Save it to the library so Director can bind it as a Costume Picture on any Shot."
+                : "The prepared reference sheet appears here. Save it to the library so Director can cast its complete multi-view object information as a single H3 picture."}
             </p>
           ) : null}
 
@@ -340,7 +366,7 @@ export function PropsPage({ onOpenLibrary }: Props) {
 
           {saved || job?.prop_id ? (
             <div className="banner ok">
-              Saved as Prop · <code>{saved?.id || job?.prop_id}</code>
+              Saved as {isCostume ? "Costume" : "Prop"} · <code>{saved?.id || job?.prop_id}</code>
               <button type="button" className="btn ghost sm" onClick={onOpenLibrary}>
                 View in Library
               </button>

@@ -63,6 +63,16 @@ class _PipelineCommon:
         """Optional synchronous preparation before a job enters the queue."""
         return None
 
+    async def prepare_run_inputs(
+        self,
+        job: JobRecord,
+        images: dict[str, tuple[str, bytes]],
+        cancel: asyncio.Event,
+    ) -> None:
+        """Optional worker-side setup before the execution adapter runs."""
+        del job, images, cancel
+        return None
+
 
 class Pipeline(_PipelineCommon, ABC):
     """

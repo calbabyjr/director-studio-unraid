@@ -126,8 +126,9 @@ def list_jobs(
         if project_id is not None and (job.project_id or None) != project_id:
             continue
         items.append(job)
-        if limit is not None and len(items) >= limit:
-            break
+    items.sort(key=lambda job: (job.created_at, job.id), reverse=True)
+    if limit is not None:
+        return items[:limit]
     return items
 
 
@@ -140,7 +141,20 @@ def save_input_file(
     project_id: str | None = None,
 ) -> Path:
     ext = Path(filename).suffix.lower() or ".png"
-    if ext not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".wav", ".mp3", ".flac", ".m4a"}:
+    if ext not in {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".gif",
+        ".wav",
+        ".mp3",
+        ".flac",
+        ".m4a",
+        ".glb",
+        ".gltf",
+        ".ply",
+    }:
         ext = ".png"
     d = job_dir(job_id, project_id=project_id)
     (d / "inputs").mkdir(parents=True, exist_ok=True)

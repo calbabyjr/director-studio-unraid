@@ -45,3 +45,34 @@ def test_resolve_skips_tiny_wardrobe(tmp_path, monkeypatch):
     assert key == "fullbody_threeview"
     assert name == "fullbody_threeview.png"
     assert len(data) == 5000
+
+
+def test_resolve_skips_actor_voice_sample(tmp_path, monkeypatch):
+    from app.core.library import images as img_mod
+
+    adir = tmp_path / "act_voice"
+    adir.mkdir()
+    (adir / "master.png").write_bytes(b"z" * 5000)
+    (adir / "voice.wav").write_bytes(b"a" * 5000)
+
+    monkeypatch.setattr(img_mod, "find_asset_dir", lambda kind, aid: adir)
+    monkeypatch.setattr(
+        img_mod,
+        "asset_dir",
+        lambda kind, aid, project_id=None: adir,
+    )
+
+    asset = LibraryAsset(
+        id="act_voice",
+        kind="actors",
+        name="t",
+        pipeline_id="actor",
+        job_id="j",
+        created_at="t",
+        files={"master": "master.png", "voice": "voice.wav"},
+    )
+    hit = resolve_asset_image(asset, role="actor")
+    assert hit is not None
+    name, _data, key = hit
+    assert key == "master"
+    assert name == "master.png"

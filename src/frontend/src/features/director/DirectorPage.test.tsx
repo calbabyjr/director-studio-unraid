@@ -67,8 +67,17 @@ vi.mock("./api", () => ({
   getProject: vi.fn(),
   queueRefFrame: vi.fn(),
   replaceShotMaterials: vi.fn(),
+  castActorOnShot: vi.fn(),
+  cancelDirectorJob: vi.fn(),
   setDirectorModel: vi.fn(),
   getDirectorMemory: vi.fn().mockResolvedValue([]),
+  getDirectorPatrol: vi.fn().mockResolvedValue({
+    enabled: true,
+    interval_sec: 1800,
+    last_run_at: null,
+    next_at: null,
+    projects: {},
+  }),
   addDirectorMemoryNote: vi.fn(),
   deleteDirectorMemoryNote: vi.fn(),
   listDirectorSouls: vi.fn().mockResolvedValue([
@@ -265,6 +274,13 @@ describe("Director shot actions", () => {
       (screen.getByPlaceholderText(/Talk to the Director/) as HTMLTextAreaElement).disabled,
     ).toBe(true);
     expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows an idle work banner when no Director turn is running", async () => {
+    render(<DirectorPage />);
+    expect(
+      await screen.findByText(/Idle · no Director turn running/),
+    ).toBeTruthy();
   });
 
   it("restores the complete saved Director conversation when a project opens", async () => {

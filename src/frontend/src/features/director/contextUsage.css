@@ -7,15 +7,15 @@
 .context-usage.warning .context-usage-trigger { color: #775510; }
 .context-usage.error .context-usage-trigger { color: var(--danger, #743a34); }
 .context-usage.compact { margin-top: 0; }
-.context-usage.compact .context-usage-trigger { width: auto; min-height: 2rem; padding: 0.34rem 0.5rem; }
+.context-usage.compact .context-usage-trigger { width: auto; min-width: 8.5rem; min-height: 2rem; padding: 0.34rem 0.5rem; }
 
-.context-dialog-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); background: rgb(24 18 14 / 42%); backdrop-filter: blur(3px); }
+.context-dialog-backdrop { position: fixed; inset: 0; z-index: 2400; display: grid; place-items: center; padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); background: rgb(24 18 14 / 42%); backdrop-filter: blur(3px); }
 .context-dialog { display: flex; flex-direction: column; width: min(680px, 100%); max-height: min(760px, calc(100dvh - 2rem)); overflow: hidden; border: 1px solid var(--border, #c9beb3); border-radius: 16px; background: var(--panel, #f7f1e9); color: var(--text, #2c2521); box-shadow: 0 24px 70px rgb(31 21 16 / 28%); }
 .context-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1rem 1.1rem 0.85rem; border-bottom: 1px solid var(--border, #c9beb3); }
 .context-dialog-header h3 { margin: 0.15rem 0 0; font-size: 1.05rem; }
 .context-dialog-eyebrow { opacity: 0.65; font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .context-dialog-close { width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--border, #c9beb3); border-radius: 999px; background: transparent; color: inherit; font-size: 1.35rem; line-height: 1; cursor: pointer; }
-.context-dialog-scroll { min-height: 0; overflow: auto; padding: 1rem 1.1rem; }
+.context-dialog-scroll { flex: 1 1 auto; min-height: 8rem; overflow: auto; padding: 1rem 1.1rem; }
 .context-usage-empty { margin: 0; color: var(--muted, #5c5149); }
 .context-usage-metrics { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.35rem 1rem; font-weight: 600; }
 .context-usage-meter { margin-top: 0.65rem; height: 6px; overflow: hidden; border-radius: 999px; background: var(--border, #c9beb3); }

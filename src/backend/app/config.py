@@ -97,7 +97,15 @@ class Settings(BaseSettings):
     director_agent_runtime: Literal["legacy", "harness"] = "legacy"
     # Legacy native-tool loop: model→tools→model rounds per user message.
     # 4 was too tight for Picture review (inspect each ref, then write_prompt).
-    director_max_tool_turns: int = Field(default=16, ge=1, le=64)
+    director_max_tool_turns: int = Field(default=32, ge=1, le=64)
+    # Each director rereads TASKS.md and memory on this interval and posts
+    # unchanged-open-work reminders into project chat. Does not queue Comfy.
+    director_memory_check_enabled: bool = True
+    director_memory_check_sec: int = Field(default=1800, ge=60, le=86400)
+    # After jobs / failed tools / H3 clips, write lessons. LLM invention only
+    # when the Director model is already loaded and Comfy does not own the GPU.
+    director_reflect_on_jobs: bool = True
+    director_reflect_with_llm: bool = True
     harness_managed: bool = True
     harness_base_url: str = "http://127.0.0.1:8791"
     harness_internal_token: str = Field(default="", repr=False)

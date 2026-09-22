@@ -7,6 +7,7 @@ import { listLibraryAssets, type LibraryAsset } from "../library/api";
 import { ShotMaterialEditor } from "./ShotMaterialEditor";
 
 const replaceShotMaterialsMock = vi.hoisted(() => vi.fn());
+const castActorOnShotMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../library/api", () => ({
   listLibraryAssets: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock("../library/api", () => ({
 
 vi.mock("./api", () => ({
   replaceShotMaterials: replaceShotMaterialsMock,
+  castActorOnShot: castActorOnShotMock,
 }));
 
 function asset(kind: string, id: string, name: string, fileKey: string): LibraryAsset {
@@ -82,6 +84,7 @@ describe("ShotMaterialEditor", () => {
       inventory.filter((item) => item.kind === kind),
     );
     replaceShotMaterialsMock.mockResolvedValue(selectedShot());
+    castActorOnShotMock.mockResolvedValue(selectedShot());
   });
 
   it("removes a selected Picture, adds a Library asset, and saves the new inventory", async () => {
@@ -218,5 +221,42 @@ describe("ShotMaterialEditor", () => {
         { role: "actor", asset_id: "act_angles", file_key: "profile" },
       ]);
     });
+  });
+
+  it("casts an actor pack onto the shot without using the Picture picker", async () => {
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+    const packed = selectedShot();
+    packed.refs = [
+      { role: "actor", asset_id: "act_1", file_key: "master", picture_index: 1 },
+      { role: "actor", asset_id: "act_1", file_key: "profile", picture_index: 2 },
+    ];
+    packed.voice_refs = [
+      { asset_id: "voi_1", audio_index: 1, file_key: "reference", speaker: "Agent" },
+    ];
+    castActorOnShotMock.mockResolvedValue(packed);
+
+    render(
+      <ShotMaterialEditor
+        shot={selectedShot()}
+        shotNumber={1}
+        onClose={onClose}
+        onOpenImage={vi.fn()}
+        onSaved={onSaved}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cast pack" }));
+
+    await waitFor(() => {
+      expect(castActorOnShotMock).toHaveBeenCalledWith("sht_1", "act_1");
+    });
+    expect(replaceShotMaterialsMock).not.toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalledWith(
+      packed,
+      "Cast Agent as a pack (stills + voice).",
+      true,
+    );
+    expect(onClose).toHaveBeenCalled();
   });
 });

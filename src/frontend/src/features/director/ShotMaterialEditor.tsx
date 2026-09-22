@@ -5,7 +5,7 @@ import {
   type LibraryAsset,
   type LibraryKind,
 } from "../library/api";
-import { replaceShotMaterials, type ShotMaterialSelection } from "./api";
+import { castActorOnShot, replaceShotMaterials, type ShotMaterialSelection } from "./api";
 
 type PictureKind = Exclude<LibraryKind, "voices">;
 
@@ -288,6 +288,28 @@ export function ShotMaterialEditor({
                     <span>{asset.kind === "layouts" ? "Layout" : asset.kind.slice(0, -1)}</span>
                     <strong>{asset.name}</strong>
                     <small>{variants.length} {variants.length === 1 ? "image" : "images"}</small>
+                    {asset.kind === "actors" ? (
+                      <button
+                        type="button"
+                        className="btn secondary sm"
+                        disabled={saving}
+                        onClick={async () => {
+                          setSaving(true);
+                          setError("");
+                          try {
+                            const updated = await castActorOnShot(shot.id, asset.id);
+                            onSaved?.(updated, `Cast ${asset.name} as a pack (stills + voice).`, true);
+                            onClose();
+                          } catch (cause) {
+                            setError(cause instanceof Error ? cause.message : String(cause));
+                          } finally {
+                            setSaving(false);
+                          }
+                        }}
+                      >
+                        Cast pack
+                      </button>
+                    ) : null}
                   </header>
                   <div className="shot-material-library-variants">
                     {variants.map(({ fileKey, preview }) => {

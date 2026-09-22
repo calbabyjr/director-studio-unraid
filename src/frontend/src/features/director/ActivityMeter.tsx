@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getDirectorVramStatus } from "./api";
+import { cancelDirectorChatSession, cancelDirectorJob, getDirectorVramStatus } from "./api";
 import { activityMeter, type ActivityMeterState } from "./generationStatus";
 
 const IDLE: ActivityMeterState = {
@@ -9,6 +9,8 @@ const IDLE: ActivityMeterState = {
 
 export function ActivityMeter() {
   const [state, setState] = useState<ActivityMeterState>(IDLE);
+  const [cancelJobId, setCancelJobId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -17,6 +19,7 @@ export function ActivityMeter() {
         const status = await getDirectorVramStatus();
         if (cancelled) return;
         setState(activityMeter(status, new Date()));
+        setCancelJobId(status.cancel_job_id || status.generation_jobs?.[0]?.job_id || null);
       } catch {
         if (!cancelled) {
           setState({
@@ -35,7 +38,10 @@ export function ActivityMeter() {
   }, []);
 
   const busy = state.kind === "comfy" || state.kind === "llm";
-  const jobs = state.jobs || [];
+  const chatProjectIds = state.cancelChatProjectIds || [];
+  const canCancel =
+    (state.kind === "comfy" && Boolean(cancelJobId))
+    || (state.kind === "llm" && chatProjectIds.length > 0);
 
   return (
     <div
@@ -47,18 +53,34 @@ export function ActivityMeter() {
       <span className="activity-meter-dot" aria-hidden="true" />
       <div className="activity-meter-copy">
         <span className="activity-meter-label">{state.label}</span>
-        {jobs.length > 1 ? (
-          <ul className="activity-meter-jobs">
-            {jobs.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        ) : null}
       </div>
       {state.count ? (
         <span className="activity-meter-count">
           {state.count} {state.count === 1 ? "job" : "jobs"}
         </span>
+      ) : null}
+      {canCancel ? (
+        <button
+          type="button"
+          className="btn ghost sm"
+          disabled={cancelling}
+          onClick={() => {
+            setCancelling(true);
+            void (async () => {
+              if (chatProjectIds.length) {
+                await Promise.all(
+                  chatProjectIds.map((projectId) => cancelDirectorChatSession(projectId)),
+                );
+                return;
+              }
+              if (cancelJobId) {
+                await cancelDirectorJob(cancelJobId);
+              }
+            })().finally(() => setCancelling(false));
+          }}
+        >
+          {cancelling ? "Cancelling…" : "Cancel"}
+        </button>
       ) : null}
     </div>
   );

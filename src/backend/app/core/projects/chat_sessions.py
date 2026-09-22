@@ -64,6 +64,19 @@ class DirectorChatSessionRegistry:
                 raise RuntimeError("Director chat session is no longer active")
             session.task = task
 
+    def is_active(self, project_id: str) -> bool:
+        return project_id in self._sessions
+
+    def list_active(self) -> list[dict[str, str | None]]:
+        return [
+            {
+                "project_id": project_id,
+                "session_id": session.session_id,
+                "started_at": session.started_at,
+            }
+            for project_id, session in self._sessions.items()
+        ]
+
     async def snapshot(self, project_id: str) -> DirectorChatSessionSnapshot:
         async with self._lock:
             session = self._sessions.get(project_id)

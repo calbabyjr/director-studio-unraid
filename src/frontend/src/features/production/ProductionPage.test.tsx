@@ -6,6 +6,7 @@ import type { ProjectDetail, PromptSections, Shot } from "../../shared/api/types
 import { ProductionPage } from "./ProductionPage";
 import { deleteLayout, getH3Job, getProject, patchShot, submitShot } from "./api";
 import { listLibraryAssets } from "../library/api";
+import { listShotTakes, pinShotTake } from "./sequenceApi";
 
 const replaceShotMaterialsMock = vi.hoisted(() => vi.fn());
 const getH3ProviderStatusMock = vi.hoisted(() => vi.fn());
@@ -36,6 +37,7 @@ vi.mock("../library/api", () => ({
 
 vi.mock("../director/api", () => ({
   replaceShotMaterials: replaceShotMaterialsMock,
+  castActorOnShot: vi.fn(),
 }));
 
 vi.mock("./sequenceApi", () => ({
@@ -54,6 +56,16 @@ vi.mock("./sequenceApi", () => ({
     last_assembly: null,
   }),
   assembleSequence: vi.fn(),
+  getProductionQueue: vi.fn(async () => ({
+    project_id: "prj_test", mode: "next", status: "idle",
+    current_shot_id: null, current_job_id: null,
+    pending_shot_ids: [], completed_shot_ids: [],
+    chain_tail_frames: true, error: null, updated_at: "",
+  })),
+  startProductionQueue: vi.fn(),
+  cancelProductionQueue: vi.fn(),
+  listShotTakes: vi.fn(async () => ({ items: [] })),
+  pinShotTake: vi.fn(),
   sequenceExportUrl: (id: string, kind: string) =>
     `/api/projects/${id}/sequence/export/${kind}`,
 }));
@@ -147,6 +159,57 @@ describe("ProductionPage prompt refresh", () => {
     await act(async () => resolveProject(detail(shot(emptyPrompt))));
     expect(await screen.findByText("1 shots")).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Shot 01 · Corridor walk-in" })).toBeTruthy();
+  });
+
+  it("does not keep reloading every shot after an H3 job has completed", async () => {
+    const completed = { ...shot(generatedPrompt), status: "succeeded", h3_job_id: "job_done" } as Shot;
+    vi.mocked(getProject).mockResolvedValue(detail(completed));
+
+    render(<ProductionPage active />);
+    await screen.findByText("Corridor walk-in");
+    const initialCalls = vi.mocked(getProject).mock.calls.length;
+
+    await new Promise((resolve) => window.setTimeout(resolve, 3100));
+    expect(getProject).toHaveBeenCalledTimes(initialCalls);
+  });
+
+  it("does not keep polling the selected H3 job after it has completed", async () => {
+    const completed = { ...shot(generatedPrompt), status: "succeeded", h3_job_id: "job_done" } as Shot;
+    vi.mocked(getProject).mockResolvedValue(detail(completed));
+    vi.mocked(getH3Job).mockResolvedValue({
+      id: "job_done", status: "succeeded", name: "done", notes: "", prompt: "", dialogue: [],
+      frames: 90, error: null, comfy_prompt_id: null, external_task_id: null,
+      created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:01:00Z",
+      outputs: {}, input_previews: {}, pipeline_id: "h3_ref2va",
+    });
+
+    render(<ProductionPage active mobile />);
+    await waitFor(() => expect(getH3Job).toHaveBeenCalledWith("job_done"));
+    await new Promise((resolve) => window.setTimeout(resolve, 1600));
+    expect(getH3Job).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the mobile Shot design details on desktop Production", async () => {
+    const planned = {
+      ...shot(emptyPrompt),
+      shot_type: "medium close-up",
+      camera_angle: "eye-level",
+      camera_motion: "tracking push toward Mia",
+      composition: "Mia holds the left third of the frame.",
+      dialogue: ["Open the hatch."],
+    };
+    vi.mocked(getProject).mockResolvedValue(detail(planned));
+
+    render(<ProductionPage active />);
+    fireEvent.click(await screen.findByText("Corridor walk-in"));
+
+    const design = await screen.findByRole("region", { name: "Shot design" });
+    expect(design.textContent).toContain("6s");
+    expect(design.textContent).toContain("medium close-up");
+    expect(design.textContent).toContain("eye-level");
+    expect(design.textContent).toContain("tracking push toward Mia");
+    expect(design.textContent).toContain("Mia holds the left third of the frame.");
+    expect(design.textContent).toContain("Open the hatch.");
   });
 
   it("shows the resolved custom workflow in Production", async () => {
@@ -290,6 +353,30 @@ describe("ProductionPage prompt refresh", () => {
     expect(screen.queryByText("Project not found")).toBeNull();
   });
 
+  it("lists H3 takes and pins a succeeded take from the Run tab", async () => {
+    vi.mocked(listShotTakes).mockResolvedValue({
+      items: [
+        { id: "job_old", status: "succeeded", created_at: "2026-01-01T00:00:00Z", pinned: false },
+        { id: "job_new", status: "succeeded", created_at: "2026-01-01T00:01:00Z", pinned: true },
+      ],
+    });
+    vi.mocked(pinShotTake).mockResolvedValue({});
+    vi.mocked(getProject).mockResolvedValue(detail(shot(generatedPrompt)));
+
+    render(<ProductionPage active />);
+    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click(screen.getByRole("tab", { name: "Run H3" }));
+
+    expect(await screen.findByText("Takes")).toBeTruthy();
+    expect(screen.getByText("job_old")).toBeTruthy();
+    expect(screen.getByText(/pinned/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Pin" }));
+
+    await waitFor(() => {
+      expect(pinShotTake).toHaveBeenCalledWith("prj_test", "sht_1", "job_old");
+    });
+  });
+
   it("renders H3 submission in the Production action surface", async () => {
     vi.mocked(getProject).mockResolvedValue(detail(shot(generatedPrompt)));
 
@@ -425,7 +512,7 @@ describe("ProductionPage prompt refresh", () => {
     expect(onReviewMaterials).not.toHaveBeenCalled();
   });
 
-  it("runs a ready Shot from the mobile Production result surface", async () => {
+  it("runs a ready Shot at the resolution selected in mobile Production", async () => {
     const ready = {
       ...shot(generatedPrompt),
       refs: [
@@ -461,9 +548,16 @@ describe("ProductionPage prompt refresh", () => {
 
     const runButton = await screen.findByRole("button", { name: "Run H3" });
     expect(runButton.hasAttribute("disabled")).toBe(false);
+    fireEvent.change(screen.getByLabelText("Resolution"), {
+      target: { value: "portrait-720" },
+    });
     fireEvent.click(runButton);
 
     expect(await screen.findByRole("button", { name: "H3 running…" })).toBeTruthy();
+    expect(submitShot).toHaveBeenCalledWith("sht_1", "local", {
+      width: 704,
+      height: 1280,
+    });
   });
 
   it("does not show the legacy layout approval column or state", async () => {
@@ -734,6 +828,53 @@ describe("ProductionPage prompt refresh", () => {
         ],
       }),
     );
+  });
+
+  it("lists voices linked to a bound actor first in the Voice picker", async () => {
+    const current = {
+      ...shot(generatedPrompt),
+      refs: [{ role: "actor" as const, asset_id: "act_mia", picture_index: 1 }],
+    };
+    vi.mocked(getProject).mockResolvedValue(detail(current));
+    vi.mocked(listLibraryAssets).mockResolvedValue([
+      {
+        id: "voi_extra",
+        kind: "voices",
+        name: "Narrator",
+        notes: "Unrelated library voice",
+        pipeline_id: "external",
+        job_id: "",
+        seed: null,
+        created_at: "2026-08-25T00:00:00Z",
+        files: { reference: "reference.wav" },
+        meta: { duration_s: 6, h3_ready: true },
+        urls: { reference: "/voice/narrator.wav" },
+        project_id: "prj_test",
+      },
+      {
+        id: "voi_mia",
+        kind: "voices",
+        name: "Mia",
+        notes: "Warm neutral English",
+        pipeline_id: "external",
+        job_id: "",
+        seed: null,
+        created_at: "2026-08-25T00:00:00Z",
+        files: { reference: "reference.wav" },
+        meta: { actor_id: "act_mia", duration_s: 4, h3_ready: true },
+        urls: { reference: "/voice/mia.wav" },
+        project_id: "prj_test",
+      },
+    ]);
+
+    render(<ProductionPage active />);
+    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click(screen.getByRole("tab", { name: "Refs" }));
+
+    const select = await screen.findByLabelText("Add Voice reference") as HTMLSelectElement;
+    const optionValues = [...select.options].map((option) => option.value).filter(Boolean);
+    expect(optionValues).toEqual(["voi_mia", "voi_extra"]);
+    expect(select.options[1].textContent).toMatch(/Linked · Mia/);
   });
 
   it("disables Voice overrides when exact source audio controls the run", async () => {

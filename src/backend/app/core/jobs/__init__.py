@@ -1,8 +1,10 @@
 from .runner import (
+    await_pipeline_job,
     cancel_job,
     close_execution_runtimes,
     recover_interrupted_jobs,
     resume_pipeline_job,
+    run_nested_pipeline_job,
     start_pipeline_job,
 )
 from .store import (
@@ -18,6 +20,7 @@ from .store import (
 )
 
 __all__ = [
+    "await_pipeline_job",
     "build_output_slots",
     "cancel_job",
     "close_execution_runtimes",
@@ -28,6 +31,7 @@ __all__ = [
     "load_job",
     "recover_interrupted_jobs",
     "resume_pipeline_job",
+    "run_nested_pipeline_job",
     "save_input_file",
     "save_job",
     "save_output_file",

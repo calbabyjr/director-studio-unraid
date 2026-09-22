@@ -65,11 +65,11 @@ export function MemoryNotes({ projectId, disabled = false }: {
   return (
     <details className="director-memory">
       <summary>
-        Standing notes
+        Permanent memory
         <span>{notes.length}</span>
       </summary>
       <p className="director-memory-hint">
-        These survive new chat sessions. Director also learns lasting rules from corrections like “this is a dungeon, not a warehouse.”
+        These survive new sessions and are compiled into Director MEMORY.md after every turn. Correct the Director once; it should not repeat the same mistake.
       </p>
       {error ? <div className="banner error">{error}</div> : null}
       {notes.length ? (
@@ -77,7 +77,7 @@ export function MemoryNotes({ projectId, disabled = false }: {
           {notes.map((note) => (
             <li key={note.id}>
               <div>
-                <strong>{note.scope === "global" ? "All projects" : "This project"}</strong>
+                <strong>{note.scope === "global" ? "This director" : "This project"}</strong>
                 <span>{note.text}</span>
               </div>
               <button
@@ -119,7 +119,7 @@ export function MemoryNotes({ projectId, disabled = false }: {
           onChange={(event) => setScope(event.target.value as "project" | "global")}
         >
           <option value="project">This project</option>
-          <option value="global">All projects</option>
+          <option value="global">This director</option>
         </select>
         <button type="submit" className="btn primary sm" disabled={busy || disabled || !draft.trim()}>
           Remember

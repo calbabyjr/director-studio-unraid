@@ -19,12 +19,14 @@ from ..jobs.store import load_job
 from ..projects.layouts import RefRole
 from ..projects.models import PromptSections, Shot, ShotStatus
 from ..projects.store import list_shots, load_project, project_dir
-from ..schemas import JobStatus
+from ..schemas import JobRecord, JobStatus
 from .clip_generations import (
     ClipGenerationAmbiguous,
     ClipGenerationError,
     ResolvedClip,
+    list_project_h3_jobs,
     list_shot_h3_generations,
+    resolve_canonical_clip,
     resolve_source_clip,
 )
 
@@ -163,12 +165,16 @@ def build_sequence_report(project_id: str) -> SequenceReport:
     if project is None:
         raise SequenceError(f"project not found: {project_id}")
     shots = list_shots(project_id)
+    h3_jobs = list_project_h3_jobs(project_id)
     entries: list[SequenceShotEntry] = []
     ready_duration = 0.0
     previous: SequenceShotEntry | None = None
 
     for index, shot in enumerate(shots, start=1):
-        clip, clip_status = resolve_shot_clip(project_id, shot)
+        generations = list_shot_h3_generations(project_id, shot.id, jobs=h3_jobs)
+        clip, clip_status = resolve_shot_clip(
+            project_id, shot, generations=generations
+        )
         entry = _shot_entry(shot, index=index, clip=clip, clip_status=clip_status)
         if previous is not None:
             entry.has_tail_from_previous = _has_tail_from(shot, previous.shot_id)
@@ -199,20 +205,25 @@ def build_sequence_report(project_id: str) -> SequenceReport:
 
 
 def resolve_shot_clip(
-    project_id: str, shot: Shot
+    project_id: str,
+    shot: Shot,
+    *,
+    generations: list[JobRecord] | None = None,
 ) -> tuple[ResolvedClip | None, SequenceClipStatus]:
-    generations = list_shot_h3_generations(project_id, shot.id)
+    if generations is None:
+        generations = list_shot_h3_generations(project_id, shot.id)
+    pinned = (shot.h3_job_id or "").strip() or None
     running = shot.status in _ACTIVE_SHOT or any(
         job.status in _ACTIVE_JOB for job in generations
     )
     clip: ResolvedClip | None = None
     try:
-        clip = resolve_source_clip(
+        clip = resolve_canonical_clip(
             project_id=project_id,
             source_shot_id=shot.id,
-            source_version="latest",
-            source_job_id=None,
+            pinned_job_id=pinned,
             output_kind=None,
+            generations=generations,
         )
     except ClipGenerationAmbiguous as exc:
         try:
@@ -222,6 +233,7 @@ def resolve_shot_clip(
                 source_version=None,
                 source_job_id=exc.latest_succeeded_job_id,
                 output_kind=None,
+                generations=generations,
             )
         except ClipGenerationError:
             clip = None
@@ -230,6 +242,8 @@ def resolve_shot_clip(
         clip = None
 
     if clip is not None:
+        if pinned and clip.source_job_id == pinned:
+            return clip, SequenceClipStatus.ready
         return clip, (
             SequenceClipStatus.running if running else SequenceClipStatus.ready
         )
@@ -320,8 +334,10 @@ def assemble_rough_cut(project_id: str) -> SequenceAssembly:
     report = build_sequence_report(project_id)
     clips: list[tuple[SequenceShotEntry, Path]] = []
     missing: list[str] = []
+    h3_jobs = list_project_h3_jobs(project_id)
     for entry, shot in zip(report.shots, list_shots(project_id), strict=True):
-        clip, status = resolve_shot_clip(project_id, shot)
+        generations = list_shot_h3_generations(project_id, shot.id, jobs=h3_jobs)
+        clip, status = resolve_shot_clip(project_id, shot, generations=generations)
         if clip is None or status not in {
             SequenceClipStatus.ready,
             SequenceClipStatus.running,

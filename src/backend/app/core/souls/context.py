@@ -15,6 +15,7 @@ def active_soul_id() -> str | None:
 
 def bind_soul_for_project(project_id: str | None) -> Token:
     from ..projects.store import load_project
+    from ..workspace.context import bind_workspace_project
     from .store import default_soul_id
 
     soul_id = default_soul_id()
@@ -22,4 +23,5 @@ def bind_soul_for_project(project_id: str | None) -> Token:
         project = load_project(project_id)
         if project is not None and getattr(project, "soul_id", None):
             soul_id = project.soul_id
+    bind_workspace_project(project_id)
     return bind_soul(soul_id)

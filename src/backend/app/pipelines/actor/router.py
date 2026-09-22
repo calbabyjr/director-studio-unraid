@@ -74,10 +74,15 @@ async def generate_actor(
     include_footwear: bool = Form(False),
     actor_image: UploadFile | None = File(None),
     wardrobe_image: UploadFile | None = File(None),
+    face_image: UploadFile | None = File(None),
+    profile_image: UploadFile | None = File(None),
+    back_image: UploadFile | None = File(None),
+    extra_threeview_image: UploadFile | None = File(None),
 ) -> ActorJobResponse:
     """
     Auto-routed casting job:
     - optional actor_image (none → text; headshot/fullbody inferred in workflow)
+    - optional extra identity stills (face/profile/back) feed the Asset Sheet
     - optional wardrobe_image (none → keep outfit; present → extract + transfer)
     - no toggles
     """
@@ -87,6 +92,19 @@ async def generate_actor(
 
     actor_img = await _read_image(actor_image, "actor_image")
     wardrobe_img = await _read_image(wardrobe_image, "wardrobe_image")
+    extras: dict[str, tuple[str, bytes]] = {}
+    for upload, key in (
+        (face_image, "face"),
+        (profile_image, "profile"),
+        (back_image, "back"),
+        (extra_threeview_image, "threeview_extra"),
+    ):
+        item = await _read_image(upload, f"{key}_image")
+        if item is not None:
+            extras[key] = item
+    if actor_img is None and extras:
+        first_key = next(key for key in ("face", "profile", "back", "threeview_extra") if key in extras)
+        actor_img = extras.pop(first_key)
     has_actor = actor_img is not None
     has_wardrobe = wardrobe_img is not None
     include_headwear = has_wardrobe and include_headwear
@@ -122,6 +140,7 @@ async def generate_actor(
             "has_wardrobe_ref": has_wardrobe,
             "include_headwear": include_headwear,
             "include_footwear": include_footwear,
+            "extra_ref_keys": list(extras),
             "mode": mode,  # display only
         },
         seed=seed_val,
@@ -134,6 +153,7 @@ async def generate_actor(
         images["actor"] = actor_img
     if wardrobe_img:
         images["wardrobe"] = wardrobe_img
+    images.update(extras)
 
     job = await start_pipeline_job(job, images=images)
     return _to_response(job)

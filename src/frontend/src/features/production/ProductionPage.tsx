@@ -28,6 +28,7 @@ import {
 import { listLibraryAssets, type LibraryAsset } from "../library/api";
 import { ShotMaterialEditor } from "../director/ShotMaterialEditor";
 import { SequencePanel } from "./SequencePanel";
+import { listShotTakes, pinShotTake } from "./sequenceApi";
 import { fetchH3Profiles } from "../../shared/api/client";
 import type { H3ActiveProfile } from "../../shared/api/types";
 
@@ -222,6 +223,7 @@ export function ProductionPage({
   const [h3Provider, setH3Provider] = useState<H3Provider>("local");
   const [resolutionPreset, setResolutionPreset] =
     useState<ResolutionPreset>("auto");
+  const [takes, setTakes] = useState<{ id: string; status: string; created_at: string; pinned: boolean }[]>([]);
 
   const selected = useMemo(
     () => shots.find((s) => s.id === selectedId) || null,
@@ -378,33 +380,43 @@ export function ProductionPage({
       setH3Job(null);
       return;
     }
+    if (!active) return;
     let cancelled = false;
+    let timer = 0;
     const tick = () => {
       getH3Job(jobId)
         .then((j) => {
-          if (!cancelled) setH3Job(j);
+          if (cancelled) return;
+          setH3Job(j);
+          if (!ACTIVE.includes(j.status) && timer) window.clearInterval(timer);
         })
         .catch(() => undefined);
     };
     tick();
-    const t = window.setInterval(tick, 1500);
+    timer = window.setInterval(tick, 1500);
     return () => {
       cancelled = true;
-      window.clearInterval(t);
+      window.clearInterval(timer);
     };
-  }, [selected?.h3_job_id]);
+  }, [active, selected?.h3_job_id]);
 
+  const shotsRunning = shots.some((s) => ACTIVE.includes(s.status as JobStatus));
   useEffect(() => {
-    if (!projectId) return;
-    const running = shots.some((s) => ACTIVE.includes(s.status as JobStatus) || s.h3_job_id);
-    if (!running) return;
+    if (!active || !projectId || !shotsRunning) return;
     const t = window.setInterval(() => {
       getProject(projectId)
         .then((d) => setShots(d.shots))
         .catch(() => undefined);
     }, 3000);
     return () => window.clearInterval(t);
-  }, [projectId, shots]);
+  }, [active, projectId, shotsRunning]);
+
+  useEffect(() => {
+    if (!projectId || !selectedId || tab !== "run") return;
+    listShotTakes(projectId, selectedId)
+      .then((payload) => setTakes(payload.items || []))
+      .catch(() => setTakes([]));
+  }, [projectId, selectedId, tab, h3Job?.id, h3Job?.status]);
 
   const replaceShot = (updated: Shot) => {
     setShots((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
@@ -490,6 +502,27 @@ export function ProductionPage({
     [voiceAssets],
   );
 
+  const boundActorIds = useMemo(() => {
+    if (!selected) return new Set<string>();
+    return new Set(
+      selected.refs.filter((ref) => ref.role === "actor").map((ref) => ref.asset_id),
+    );
+  }, [selected]);
+
+  const pickerVoices = useMemo(() => {
+    const remaining = voiceAssets.filter(
+      (asset) => !draftVoiceRefs.some((ref) => ref.asset_id === asset.id),
+    );
+    const isLinked = (asset: LibraryAsset) => {
+      const actorId = typeof asset.meta?.actor_id === "string" ? asset.meta.actor_id : "";
+      return Boolean(actorId && boundActorIds.has(actorId));
+    };
+    return {
+      linked: remaining.filter(isLinked),
+      others: remaining.filter((asset) => !isLinked(asset)),
+    };
+  }, [voiceAssets, draftVoiceRefs, boundActorIds]);
+
   const normalizeVoiceRefs = (refs: ShotVoiceRef[]) =>
     refs.map((ref, index) => ({ ...ref, audio_index: index + 1 }));
 
@@ -559,6 +592,26 @@ export function ProductionPage({
     { id: "prompt", label: "Prompt" },
     { id: "run", label: "Run H3" },
   ];
+
+  const resolutionPicker = (
+    <label className="field-label h3-resolution-picker">
+      Resolution
+      <select
+        className="field-input"
+        value={resolutionPreset}
+        disabled={busy || jobActive}
+        onChange={(event) =>
+          setResolutionPreset(event.target.value as ResolutionPreset)
+        }
+      >
+        <option value="auto">Auto from project</option>
+        <option value="landscape-480">Landscape · 864×480</option>
+        <option value="landscape-720">Landscape 720p tier · 1280×704</option>
+        <option value="portrait-480">Portrait · 480×864</option>
+        <option value="portrait-720">Portrait 720p tier · 704×1280</option>
+      </select>
+    </label>
+  );
 
   const providerPicker = (
     <label className="h3-provider-picker">
@@ -675,6 +728,7 @@ export function ProductionPage({
                 </div>
               ) : null}
               {providerPicker}
+              {resolutionPicker}
               <button
                 type="button"
                 className="btn primary mobile-production-run"
@@ -862,10 +916,34 @@ export function ProductionPage({
               <div className="shot-editor-header">
                 <div>
                   <h2 className="shot-editor-title">{selected.title || selected.id}</h2>
-                  <p className="shot-beat muted">{selected.script_beat}</p>
                 </div>
                 <ProductionStatusChip shot={selected} />
               </div>
+
+              <section className="desktop-shot-design" aria-label="Shot design">
+                <h3>Shot design</h3>
+                <p className="shot-beat muted">{selected.script_beat}</p>
+                <dl className="shot-design-metadata">
+                  <div><dt>Duration</dt><dd>{selected.duration_s}s</dd></div>
+                  <div><dt>Framing</dt><dd>{selected.shot_type || "—"}</dd></div>
+                  <div><dt>Angle</dt><dd>{selected.camera_angle || "—"}</dd></div>
+                  <div><dt>Motion</dt><dd>{selected.camera_motion || "—"}</dd></div>
+                </dl>
+                {selected.composition ? (
+                  <div className="shot-design-note">
+                    <span>Composition</span>
+                    <p>{selected.composition}</p>
+                  </div>
+                ) : null}
+                {selected.dialogue?.length ? (
+                  <div className="shot-design-note">
+                    <span>Dialogue</span>
+                    {selected.dialogue.map((line, index) => (
+                      <p key={`${line}-${index}`}>{line}</p>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
 
               <div className="segment-tabs" role="tablist">
                 {tabs.map((t) => (
@@ -966,11 +1044,26 @@ export function ProductionPage({
                             onChange={(e) => setSelectedVoiceId(e.target.value)}
                           >
                             <option value="">Choose from Voice Library…</option>
-                            {voiceAssets
-                              .filter((asset) => !draftVoiceRefs.some((ref) => ref.asset_id === asset.id))
-                              .map((asset) => (
+                            {pickerVoices.linked.length ? (
+                              <optgroup label="Linked to bound actor">
+                                {pickerVoices.linked.map((asset) => (
+                                  <option key={asset.id} value={asset.id}>
+                                    Linked · {asset.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ) : null}
+                            {pickerVoices.linked.length && pickerVoices.others.length ? (
+                              <optgroup label="Other voices">
+                                {pickerVoices.others.map((asset) => (
+                                  <option key={asset.id} value={asset.id}>{asset.name}</option>
+                                ))}
+                              </optgroup>
+                            ) : (
+                              pickerVoices.others.map((asset) => (
                                 <option key={asset.id} value={asset.id}>{asset.name}</option>
-                              ))}
+                              ))
+                            )}
                           </select>
                         </label>
                         <button
@@ -1041,6 +1134,17 @@ export function ProductionPage({
 
                 {tab === "prompt" ? (
                   <div className="tab-panel">
+                    {selected.meta?.prompt_user_edited ? (
+                      <p className="field-hint">
+                        Production edits are locked. Director prompt refreshes keep this wording
+                        and only add missing Picture or Audio tags.
+                      </p>
+                    ) : (
+                      <p className="field-hint">
+                        Save prompt to lock these sections. The Director will keep saved Production
+                        wording on later prompt refreshes.
+                      </p>
+                    )}
                     {PROMPT_SECTION_KEYS.map(({ key, label }) => (
                       <label key={key} className="field">
                         <span>{label}</span>
@@ -1090,23 +1194,7 @@ export function ProductionPage({
 
                 {tab === "run" ? (
                   <div className="tab-panel">
-                    <label className="field-label">
-                      Resolution
-                      <select
-                        className="field-input"
-                        value={resolutionPreset}
-                        disabled={busy || jobActive}
-                        onChange={(event) =>
-                          setResolutionPreset(event.target.value as ResolutionPreset)
-                        }
-                      >
-                        <option value="auto">Auto from project</option>
-                        <option value="landscape-480">Landscape · 864×480</option>
-                        <option value="landscape-720">Landscape 720p tier · 1280×704</option>
-                        <option value="portrait-480">Portrait · 480×864</option>
-                        <option value="portrait-720">Portrait 720p tier · 704×1280</option>
-                      </select>
-                    </label>
+                    {resolutionPicker}
                     <ol className="run-steps">
                       <li className={(selected.refs?.length ?? 0) > 0 ? "done" : ""}>
                         Refs cast
@@ -1160,6 +1248,36 @@ export function ProductionPage({
                     ) : (
                       <p className="field-hint">No H3 job yet for this shot.</p>
                     )}
+
+                    {takes.length ? (
+                      <div className="takes-list">
+                        <strong>Takes</strong>
+                        {takes.map((take) => (
+                          <div key={take.id} className="takes-list-item muted tiny">
+                            <code>{take.id}</code> · {take.status}
+                            {take.pinned ? " · pinned" : (
+                              take.status === "succeeded" && projectId && selected ? (
+                                <button
+                                  type="button"
+                                  className="btn ghost sm"
+                                  onClick={() => {
+                                    void pinShotTake(projectId, selected.id, take.id)
+                                      .then(() => loadProject(projectId))
+                                      .then(() => listShotTakes(projectId, selected.id))
+                                      .then((payload) => setTakes(payload.items || []))
+                                      .catch((cause) => setError(
+                                        cause instanceof Error ? cause.message : String(cause),
+                                      ));
+                                  }}
+                                >
+                                  Pin
+                                </button>
+                              ) : null
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
 
                     {providerPicker}
 

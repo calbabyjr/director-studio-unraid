@@ -62,6 +62,43 @@ describe("generation status formatting", () => {
     ]);
   });
 
+  it("labels costume and MoGe plate jobs", () => {
+    expect(
+      generationStatusText(
+        {
+          ...status,
+          generation_count: 1,
+          generation_jobs: [{
+            job_id: "job_costume",
+            pipeline_id: "costume",
+            kind: "image",
+            status: "running",
+            phase: "generating",
+            queued_at: "2026-08-31T10:01:00Z",
+          }],
+        },
+        new Date("2026-08-31T10:02:00Z"),
+      ),
+    ).toBe("Generating image · Costume · 01:00");
+    expect(
+      generationStatusText(
+        {
+          ...status,
+          generation_count: 1,
+          generation_jobs: [{
+            job_id: "job_moge",
+            pipeline_id: "moge_plate",
+            kind: "image",
+            status: "running",
+            phase: "generating",
+            queued_at: "2026-08-31T10:01:00Z",
+          }],
+        },
+        new Date("2026-08-31T10:02:00Z"),
+      ),
+    ).toBe("Generating image · MoGe · 01:00");
+  });
+
   it("labels image generation in English", () => {
     expect(
       generationStatusText(
@@ -75,18 +112,59 @@ describe("generation status formatting", () => {
     ).toBe("Generating image · Layout · 01:00");
   });
 
-  it("surfaces every running job even when chat is not locked", () => {
+  it("keeps Comfy activity to one line plus a waiting count", () => {
     const meter = activityMeter(
       { ...status, chat_locked: false },
       new Date("2026-08-31T10:02:37Z"),
     );
     expect(meter.kind).toBe("comfy");
     expect(meter.count).toBe(3);
-    expect(meter.jobs).toEqual([
-      "Generating video · H3 video · 02:37",
-      "Queued · Layout · 01:37",
-      "Queued · Actor · 00:37",
-    ]);
+    expect(meter.label).toBe("ComfyUI · Generating video · H3 video · 02:37 · 2 waiting");
+    expect(meter.jobs).toBeUndefined();
+  });
+
+  it("includes the Comfy queue depth on the activity meter", () => {
+    const meter = activityMeter(
+      {
+        ...status,
+        chat_locked: false,
+        comfy_queue: { running: 1, pending: 2, prompt_id: "p1" },
+        cancel_job_id: "job_video",
+      },
+      new Date("2026-08-31T10:02:37Z"),
+    );
+    expect(meter.label).toBe(
+      "ComfyUI · Generating video · H3 video · 02:37 · 2 waiting · queue 2",
+    );
+  });
+
+  it("labels an active Director chat turn as working even when the LLM is keep-alive", () => {
+    expect(
+      activityMeter(
+        {
+          chat_locked: false,
+          generation_count: 0,
+          generation_jobs: [],
+          owner: null,
+          director_working: true,
+          director_chats: [
+            {
+              project_id: "prj_1",
+              session_id: "chat_1",
+              started_at: "2026-08-31T10:00:00Z",
+            },
+          ],
+          ollama_on_gpu: true,
+          ollama_ps: [{ name: "fable-qwen35-9b-q8:latest", size_vram: 10_900_000_000 }],
+        },
+        new Date("2026-08-31T10:00:42Z"),
+      ),
+    ).toEqual({
+      kind: "llm",
+      label: "Director working · calling tools / thinking · 00:42",
+      count: 1,
+      cancelChatProjectIds: ["prj_1"],
+    });
   });
 
   it("explains idle VRAM keep-alive so a loaded model is not mistaken for a crash", () => {

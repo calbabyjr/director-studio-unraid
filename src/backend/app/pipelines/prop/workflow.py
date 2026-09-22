@@ -8,6 +8,7 @@ import random
 from typing import Any
 
 from ...config import settings
+from ...core.json_cache import load_json_file
 from ...core.schemas import ComfyImageRef
 
 WORKFLOW_FILENAME = "qwen_prop_master.api.json"
@@ -67,7 +68,7 @@ def load_base_prompt() -> dict[str, Any]:
     path = workflow_path()
     if not path.exists():
         raise FileNotFoundError(f"Workflow API JSON not found: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return load_json_file(path)
 
 
 def compile_prop_instruction(*, name: str = "", notes: str = "", view: str = "") -> str:

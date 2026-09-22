@@ -17,6 +17,13 @@ vi.mock("../library/api", () => ({
   listLibraryAssets: vi.fn(),
   recastLibraryAsset: vi.fn(),
   updateLibraryAsset: updateLibraryAssetMock,
+  addLibraryAssetFile: vi.fn(),
+  addActorVoiceSample: vi.fn(),
+  listActorTakes: vi.fn(async () => ({ items: [] })),
+  pinActorTake: vi.fn(),
+  updateActorSheet: vi.fn(),
+  getActorJob: vi.fn(),
+  getLibraryAsset: vi.fn(),
 }));
 
 const actor = {

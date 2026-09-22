@@ -4,6 +4,8 @@ import { Lightbox } from "../../shared/components/Lightbox";
 import { OutputGrid } from "../../shared/components/OutputGrid";
 import type { OutputSlot } from "../../shared/api/types";
 import { useProject } from "../../shared/project/ProjectContext";
+import { ActorTakesList } from "../library/ActorTakesList";
+import { addActorVoiceSample, addLibraryAssetFile } from "../library/api";
 import {
   cancelJob,
   fetchDefaults,
@@ -36,6 +38,8 @@ export function CastingPage({ onOpenLibrary }: Props) {
   const [seed, setSeed] = useState("");
   const [actorImg, setActorImg] = useState<LocalImage | null>(null);
   const [wardrobeImg, setWardrobeImg] = useState<LocalImage | null>(null);
+  const [extraViews, setExtraViews] = useState<(LocalImage | null)[]>([null, null, null, null]);
+  const [voiceSample, setVoiceSample] = useState<File | null>(null);
   const [includeHeadwear, setIncludeHeadwear] = useState(false);
   const [includeFootwear, setIncludeFootwear] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -67,6 +71,8 @@ export function CastingPage({ onOpenLibrary }: Props) {
     setSeed("");
     setActorImg(null);
     setWardrobeImg(null);
+    setExtraViews([null, null, null, null]);
+    setVoiceSample(null);
     setIncludeHeadwear(false);
     setIncludeFootwear(false);
     setFieldErrors({});
@@ -107,7 +113,8 @@ export function CastingPage({ onOpenLibrary }: Props) {
   const validate = (): boolean => {
     const err: Record<string, string> = {};
     if (!name.trim()) err.name = "Name is required";
-    if (!actorImg && !description.trim()) {
+    const hasIdentityPhoto = Boolean(actorImg || extraViews.some(Boolean));
+    if (!hasIdentityPhoto && !description.trim()) {
       err.description = "Description is required when no actor reference is uploaded";
     }
     if (fixedSeed && seed && Number.isNaN(Number(seed))) err.seed = "Seed must be an integer";
@@ -137,6 +144,10 @@ export function CastingPage({ onOpenLibrary }: Props) {
       if (fixedSeed && seed.trim()) fd.set("seed", seed.trim());
       if (actorImg) fd.set("actor_image", actorImg.file, actorImg.file.name);
       if (wardrobeImg) fd.set("wardrobe_image", wardrobeImg.file, wardrobeImg.file.name);
+      const extraFields = ["face_image", "profile_image", "back_image", "extra_threeview_image"] as const;
+      extraViews.forEach((view, index) => {
+        if (view) fd.set(extraFields[index], view.file, view.file.name);
+      });
       fd.set("include_headwear", wardrobeImg && includeHeadwear ? "true" : "false");
       fd.set("include_footwear", wardrobeImg && includeFootwear ? "true" : "false");
       setJob(await generateActor(fd));
@@ -169,6 +180,21 @@ export function CastingPage({ onOpenLibrary }: Props) {
         notes,
         project_id: projectId,
       });
+      const extraKeys = ["face", "profile", "back", "threeview_extra"] as const;
+      for (const [index, view] of extraViews.entries()) {
+        if (!view) continue;
+        await addLibraryAssetFile(
+          "actors",
+          actor.id,
+          view.file,
+          extraKeys[index] || "extra",
+        );
+      }
+      if (voiceSample) {
+        await addActorVoiceSample(actor.id, voiceSample, {
+          name: `${name.trim()} voice`,
+        });
+      }
       setSavedActor(actor);
       setJob({ ...job, actor_id: actor.id });
     } catch (e) {
@@ -183,6 +209,8 @@ export function CastingPage({ onOpenLibrary }: Props) {
     setNotes("");
     setActorImg(null);
     setWardrobeImg(null);
+    setExtraViews([null, null, null, null]);
+    setVoiceSample(null);
     setIncludeHeadwear(false);
     setIncludeFootwear(false);
     setFixedSeed(false);
@@ -278,6 +306,44 @@ export function CastingPage({ onOpenLibrary }: Props) {
                 error={fieldErrors.wardrobe}
               />
             </div>
+            <p className="muted tiny">
+              Extra views (face, profile, back) go into the generated Asset Sheet as more identity photos of the same person, then stay on the saved actor so H3 can bind more Pictures.
+            </p>
+            <div className="upload-row extra-actor-views">
+              {[0, 1, 2, 3].map((index) => (
+                <ImageUploadSlot
+                  key={index}
+                  label={["Face", "Profile", "Back", "Extra three-view"][index]}
+                  value={extraViews[index]}
+                  disabled={isRunning}
+                  onChange={(value) => {
+                    setExtraViews((current) => current.map((item, itemIndex) => (
+                      itemIndex === index ? value : item
+                    )));
+                  }}
+                />
+              ))}
+            </div>
+            <p className="muted tiny">
+              Optional 2–15 second voice sample stays on the actor and is saved as an H3-ready Voice library asset.
+            </p>
+            <label className="field">
+              <span>Voice sample</span>
+              <input
+                type="file"
+                accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg"
+                disabled={isRunning}
+                aria-label="Voice sample"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  setVoiceSample(file);
+                  event.target.value = "";
+                }}
+              />
+              {voiceSample ? (
+                <span className="muted tiny">{voiceSample.name}</span>
+              ) : null}
+            </label>
             {wardrobeImg ? (
               <div className="wardrobe-options">
                 <label className="check">
@@ -421,12 +487,15 @@ export function CastingPage({ onOpenLibrary }: Props) {
           </div>
 
           {savedActor || job?.actor_id ? (
-            <div className="banner ok">
-              Saved as Actor · <code>{savedActor?.id || job?.actor_id}</code>
-              <button type="button" className="btn ghost sm" onClick={onOpenLibrary}>
-                View in Library
-              </button>
-            </div>
+            <>
+              <div className="banner ok">
+                Saved as Actor · <code>{savedActor?.id || job?.actor_id}</code>
+                <button type="button" className="btn ghost sm" onClick={onOpenLibrary}>
+                  View in Library
+                </button>
+              </div>
+              <ActorTakesList actorId={(savedActor?.id || job?.actor_id) as string} busy={busy} />
+            </>
           ) : null}
         </section>
       </main>

@@ -41,7 +41,7 @@ services:
       DS_COMFY_BASE_URL: http://127.0.0.1:8188
       DS_OLLAMA_BASE_URL: http://127.0.0.1:11434
       DS_LLM_PROVIDER: ollama
-      DS_DIRECTOR_AGENT_RUNTIME: legacy
+      DS_DIRECTOR_AGENT_RUNTIME: harness
       DS_DIRECTOR_MAX_TOOL_TURNS: "16"
       DS_H3_PROVIDER: local
       DS_VRAM_POLICY: exclusive

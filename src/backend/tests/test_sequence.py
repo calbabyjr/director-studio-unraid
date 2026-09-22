@@ -65,29 +65,42 @@ def _project_with_shots(*shots: Shot):
     return project
 
 
-def _h3_clip(project_id: str, shot_id: str, *, filename: str = "video.mp4") -> None:
+def _h3_clip(
+    project_id: str,
+    shot_id: str,
+    *,
+    filename: str = "video.mp4",
+    created_at: str | None = None,
+    status: JobStatus = JobStatus.succeeded,
+    write_file: bool = True,
+) -> str:
     job = create_job(
         pipeline_id="h3_ref2va",
         asset_kind="productions",
-        name=f"{shot_id} v1",
+        name=f"{shot_id} {filename}",
         project_id=project_id,
         params={"shot_id": shot_id, "project_id": project_id},
     )
     out_dir = job_dir(job.id, project_id=project_id) / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / filename
-    path.write_bytes(b"fake-mp4")
-    job.status = JobStatus.succeeded
-    job.outputs = {
-        "video": OutputSlot(
-            key="video",
-            label="Video",
-            path=str(path),
-            filename=filename,
-            url=f"/api/files/jobs/{job.id}/outputs/{filename}",
-        )
-    }
+    if write_file:
+        path.write_bytes(b"fake-mp4")
+    if created_at is not None:
+        job.created_at = created_at
+    job.status = status
+    if status == JobStatus.succeeded or write_file:
+        job.outputs = {
+            "video": OutputSlot(
+                key="video",
+                label="Video",
+                path=str(path),
+                filename=filename,
+                url=f"/api/files/jobs/{job.id}/outputs/{filename}",
+            )
+        }
     save_job(job)
+    return job.id
 
 
 def test_runtime_and_timecode_helpers():
@@ -232,6 +245,127 @@ def test_srt_edl_and_csv_follow_storyboard_order(tmp_projects_dir, monkeypatch):
     assert csv.startswith("index,shot_id,")
     assert "Entry" in csv
     assert "Hold" in csv
+
+
+def test_sequence_report_uses_pinned_take_not_latest(tmp_projects_dir, monkeypatch):
+    from app.core.media.sequence import resolve_shot_clip
+
+    jobs = tmp_projects_dir.parent / "jobs"
+    jobs.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(settings, "jobs_dir", jobs)
+    monkeypatch.setattr(settings, "data_dir", tmp_projects_dir.parent)
+
+    shot = _shot("pending", "sht_a", status=ShotStatus.succeeded)
+    project = _project_with_shots(shot)
+    shot = shot.model_copy(update={"project_id": project.id})
+    older = _h3_clip(
+        project.id,
+        shot.id,
+        filename="take1.mp4",
+        created_at="2026-08-01T10:00:00+00:00",
+    )
+    newer = _h3_clip(
+        project.id,
+        shot.id,
+        filename="take2.mp4",
+        created_at="2026-08-01T11:00:00+00:00",
+    )
+    unpinned = shot.model_copy(update={"h3_job_id": newer})
+    save_shot(unpinned)
+    latest_clip, latest_status = resolve_shot_clip(project.id, unpinned)
+    assert latest_clip is not None
+    assert latest_clip.source_job_id == newer
+    assert latest_status == SequenceClipStatus.ready
+
+    pinned = unpinned.model_copy(update={"h3_job_id": older})
+    save_shot(pinned)
+    clip, status = resolve_shot_clip(project.id, pinned)
+    assert clip is not None
+    assert clip.source_job_id == older
+    assert status == SequenceClipStatus.ready
+
+    report = build_sequence_report(project.id)
+    assert report.shots[0].clip_job_id == older
+    assert report.shots[0].clip_status == SequenceClipStatus.ready
+    assert report.clips_ready == 1
+
+
+def test_sequence_report_falls_back_when_pin_is_missing_or_failed(
+    tmp_projects_dir, monkeypatch
+):
+    jobs = tmp_projects_dir.parent / "jobs"
+    jobs.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(settings, "jobs_dir", jobs)
+    monkeypatch.setattr(settings, "data_dir", tmp_projects_dir.parent)
+
+    shot = _shot("pending", "sht_a", status=ShotStatus.succeeded)
+    project = _project_with_shots(shot)
+    shot = shot.model_copy(update={"project_id": project.id})
+    older = _h3_clip(
+        project.id,
+        shot.id,
+        filename="take1.mp4",
+        created_at="2026-08-01T10:00:00+00:00",
+    )
+    newer = _h3_clip(
+        project.id,
+        shot.id,
+        filename="take2.mp4",
+        created_at="2026-08-01T11:00:00+00:00",
+    )
+    failed = _h3_clip(
+        project.id,
+        shot.id,
+        filename="failed.mp4",
+        created_at="2026-08-01T09:00:00+00:00",
+        status=JobStatus.failed,
+        write_file=False,
+    )
+
+    missing_pin = shot.model_copy(update={"h3_job_id": "job_gone"})
+    save_shot(missing_pin)
+    report = build_sequence_report(project.id)
+    assert report.shots[0].clip_job_id == newer
+
+    failed_pin = shot.model_copy(update={"h3_job_id": failed})
+    save_shot(failed_pin)
+    report = build_sequence_report(project.id)
+    assert report.shots[0].clip_job_id == newer
+    assert older != newer
+
+
+def test_sequence_report_pinned_take_stays_ready_when_newer_is_running(
+    tmp_projects_dir, monkeypatch
+):
+    jobs = tmp_projects_dir.parent / "jobs"
+    jobs.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(settings, "jobs_dir", jobs)
+    monkeypatch.setattr(settings, "data_dir", tmp_projects_dir.parent)
+
+    shot = _shot("pending", "sht_a", status=ShotStatus.succeeded)
+    project = _project_with_shots(shot)
+    shot = shot.model_copy(update={"project_id": project.id})
+    older = _h3_clip(
+        project.id,
+        shot.id,
+        filename="take1.mp4",
+        created_at="2026-08-01T10:00:00+00:00",
+    )
+    _h3_clip(
+        project.id,
+        shot.id,
+        filename="take2.mp4",
+        created_at="2026-08-01T11:00:00+00:00",
+        status=JobStatus.running,
+        write_file=False,
+    )
+    pinned = shot.model_copy(
+        update={"h3_job_id": older, "status": ShotStatus.succeeded}
+    )
+    save_shot(pinned)
+    report = build_sequence_report(project.id)
+    assert report.shots[0].clip_job_id == older
+    assert report.shots[0].clip_status == SequenceClipStatus.ready
 
 
 def test_assemble_requires_a_succeeded_clip(tmp_projects_dir, monkeypatch):

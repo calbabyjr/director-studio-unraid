@@ -8,6 +8,8 @@ import {
   updateProject,
   type DirectorSoul,
 } from "../director/api";
+import { DirectorMemorySetup } from "./DirectorMemorySetup";
+import { WorkspaceFilesSetup } from "./WorkspaceFilesSetup";
 
 export function DirectorSoulSetup() {
   const { project, projectId, refreshProjects } = useProject();
@@ -130,8 +132,8 @@ export function DirectorSoulSetup() {
         <div className="workspace-kicker">Director souls</div>
         <h2>Persona and learned craft</h2>
         <p>
-          Each soul is a <code>soul.md</code> file you can edit. Create souls here even with no project open.
-          Lessons accumulate as you correct the Director and carry into the next film that uses this soul.
+          Each director has its own <code>soul.md</code>, MEMORY.md, and workspace files.
+          Create souls here even with no project open. Lessons stay with this persona.
         </p>
       </header>
       {error ? <div className="banner error">{error}</div> : null}
@@ -215,6 +217,8 @@ export function DirectorSoulSetup() {
               </button>
             ) : null}
           </div>
+          <DirectorMemorySetup soulId={selected.id} />
+          <WorkspaceFilesSetup scope="global" soulId={selected.id} />
         </div>
       ) : null}
     </section>

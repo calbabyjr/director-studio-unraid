@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
-from ...core.schemas import ComfyImageRef, JobRecord, LibraryAsset
+from ...core.schemas import ComfyImageRef, JobRecord, JobStatus, LibraryAsset
 from ..base import Pipeline
 from . import workflow
 
@@ -60,6 +61,12 @@ class ScenePipeline(Pipeline):
                         "hint": "Single plate / set still — multi-angle LoRA re-shoots it",
                     },
                     {
+                        "id": "moge_glb",
+                        "label": "MoGe 3D mesh (optional)",
+                        "required": False,
+                        "hint": "Textured .glb from MoGe; extra cameras feed Qwen with the plate",
+                    },
+                    {
                         "id": "angle_prompts",
                         "label": "Angle list (one per line)",
                         "required": True,
@@ -86,6 +93,59 @@ class ScenePipeline(Pipeline):
         )
         return base
 
+    async def prepare_run_inputs(
+        self,
+        job: JobRecord,
+        images: dict[str, tuple[str, bytes]],
+        cancel: asyncio.Event,
+    ) -> None:
+        if not job.params.get("moge_from_plate"):
+            return
+        if all(images.get(key) for key in workflow.MOGE_EXTRA_KEYS):
+            return
+        scene = images.get("scene")
+        if not scene:
+            raise ValueError("scene plate is required for MoGe from plate")
+
+        from ...core.jobs.runner import run_nested_pipeline_job
+        from ...core.jobs.store import create_job, job_dir, save_input_file, save_job
+        from ..registry import get_pipeline
+
+        moge_pipe = get_pipeline("moge_plate")
+        moge_job = create_job(
+            pipeline_id=moge_pipe.id,
+            asset_kind="scenes",
+            name=f"moge:{job.name}",
+            notes="Depth and normals from scene plate",
+            project_id=job.project_id,
+        )
+        job.params["moge_plate_job_id"] = moge_job.id
+        job.status = JobStatus.uploading
+        save_job(job)
+        moge_job = await run_nested_pipeline_job(
+            moge_job,
+            images={"scene": scene},
+            cancel=cancel,
+        )
+        if cancel.is_set():
+            raise asyncio.CancelledError
+        if moge_job.status != JobStatus.succeeded:
+            raise ValueError(
+                f"MoGe from plate failed: {moge_job.error or moge_job.status.value}"
+            )
+        out_dir = job_dir(moge_job.id, project_id=moge_job.project_id) / "outputs"
+        for key in workflow.MOGE_EXTRA_KEYS:
+            slot = (moge_job.outputs or {}).get(key)
+            filename = getattr(slot, "filename", None)
+            path = out_dir / filename if filename else None
+            if path is None or not path.is_file():
+                raise ValueError(f"MoGe from plate missing {key}")
+            data = path.read_bytes()
+            images[key] = (path.name, data)
+            save_input_file(
+                job.id, key, path.name, data, project_id=job.project_id
+            )
+
     def build_prompt(
         self,
         job: JobRecord,
@@ -95,6 +155,11 @@ class ScenePipeline(Pipeline):
         scene = uploaded_images.get("scene")
         if not scene:
             raise ValueError("scene reference image is required")
+        extra_images = {
+            key: uploaded_images[key]
+            for key in workflow.MOGE_EXTRA_KEYS
+            if uploaded_images.get(key)
+        }
         p = job.params
         prompt, seed, used, stems = workflow.build_scene_prompt(
             scene_image_name=scene,
@@ -102,6 +167,7 @@ class ScenePipeline(Pipeline):
             angle_prompts=p.get("angle_prompts") or workflow.DEFAULT_ANGLES,
             prepend_text=p.get("prepend_text") or "",
             append_text=p.get("append_text") or "",
+            extra_images=extra_images,
             start_index=int(p.get("start_index") or 0),
             max_rows=p.get("max_rows"),
             seed=job.seed,
@@ -137,7 +203,7 @@ class ScenePipeline(Pipeline):
         )
 
     def library_input_keys(self) -> list[str]:
-        return ["scene"]
+        return ["scene", "moge_orbit", "moge_back"]
 
     def save_to_library(
         self,

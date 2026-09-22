@@ -13,6 +13,7 @@ import random
 from typing import Any
 
 from ...config import settings
+from ...core.json_cache import load_json_file
 from ...core.schemas import ComfyImageRef
 
 WORKFLOW_FILENAME = "ref_frame_layout.api.json"
@@ -89,7 +90,7 @@ def workflow_file_valid() -> bool:
     if not path.exists():
         return False
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = load_json_file(path)
     except (OSError, json.JSONDecodeError):
         return False
     if not isinstance(data, dict) or not data:
@@ -105,7 +106,7 @@ def load_base_prompt() -> dict[str, Any]:
     path = workflow_path()
     if not path.exists():
         raise FileNotFoundError(f"Workflow API JSON not found: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return load_json_file(path)
 
 
 def fill_layout_graph(graph: dict[str, Any], job_params: dict[str, Any]) -> dict[str, Any]:

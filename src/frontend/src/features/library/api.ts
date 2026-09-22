@@ -85,6 +85,40 @@ export async function recastLibraryAsset(
   return res.json();
 }
 
+export async function addLibraryAssetFile(
+  kind: string,
+  assetId: string,
+  file: File,
+  key?: string,
+): Promise<LibraryAsset> {
+  const body = new FormData();
+  body.set("file", file, file.name);
+  if (key?.trim()) body.set("key", key.trim());
+  const res = await fetch(
+    `/api/library/${encodeURIComponent(kind)}/${encodeURIComponent(assetId)}/files`,
+    { method: "POST", body },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function addActorVoiceSample(
+  assetId: string,
+  file: File,
+  opts?: { name?: string; notes?: string },
+): Promise<LibraryAsset> {
+  const body = new FormData();
+  body.set("file", file, file.name);
+  if (opts?.name?.trim()) body.set("name", opts.name.trim());
+  if (opts?.notes?.trim()) body.set("notes", opts.notes.trim());
+  const res = await fetch(
+    `/api/library/actors/${encodeURIComponent(assetId)}/voice`,
+    { method: "POST", body },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export async function updateLibraryAsset(
   kind: string,
   assetId: string,
@@ -97,6 +131,69 @@ export async function updateLibraryAsset(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(metadata),
     },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export interface ActorTake {
+  id: string;
+  status: string;
+  created_at: string;
+  pinned: boolean;
+}
+
+export async function listActorTakes(
+  assetId: string,
+): Promise<{ items: ActorTake[] }> {
+  const res = await fetch(
+    `/api/library/actors/${encodeURIComponent(assetId)}/takes`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function getLibraryAsset(
+  kind: string,
+  assetId: string,
+): Promise<LibraryAsset> {
+  const res = await fetch(
+    `/api/library/${encodeURIComponent(kind)}/${encodeURIComponent(assetId)}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function updateActorSheet(assetId: string): Promise<{
+  id: string;
+  status: string;
+  error: string | null;
+}> {
+  const res = await fetch(
+    `/api/library/actors/${encodeURIComponent(assetId)}/update-sheet`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function getActorJob(jobId: string): Promise<{
+  id: string;
+  status: string;
+  error: string | null;
+}> {
+  const res = await fetch(`/api/actors/jobs/${encodeURIComponent(jobId)}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function pinActorTake(
+  assetId: string,
+  jobId: string,
+): Promise<LibraryAsset> {
+  const res = await fetch(
+    `/api/library/actors/${encodeURIComponent(assetId)}/takes/${encodeURIComponent(jobId)}/pin`,
+    { method: "POST" },
   );
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();

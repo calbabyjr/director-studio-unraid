@@ -14,6 +14,7 @@ vi.mock("../library/api", () => ({
 
 vi.mock("./api", () => ({
   replaceShotMaterials: replaceShotMaterialsMock,
+  castActorOnShot: vi.fn(),
 }));
 
 function shot(id: string, title: string): Shot {

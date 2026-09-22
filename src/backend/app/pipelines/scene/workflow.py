@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import copy
-import json
 import random
 import re
 from typing import Any
 
 from ...config import settings
+from ...core.json_cache import load_json_file
 from ...core.schemas import ComfyImageRef
 
 NODE_SCENE_IMAGE = "41"
@@ -18,6 +18,16 @@ NODE_SCENE_ENCODE = "105"
 NODE_SCENE_SCALE = "107"
 NODE_NEGATIVE = "96"
 NODE_LIGHTNING = "102"
+NODE_POSITIVE_ENCODE = "112"
+NODE_MOGE_ORBIT = "130"
+NODE_MOGE_BACK = "131"
+MOGE_EXTRA_KEYS = ("moge_orbit", "moge_back")
+
+_MOGE_PREPEND = (
+    " Image 1 is the scene plate. Extra images are additional cameras of the same "
+    "set from a MoGe 3D mesh. Keep architecture, furniture layout, materials, and "
+    "lighting consistent with every image."
+)
 
 WORKFLOW_FILENAME = "QwenEdit2511_MultiAngle_SceneRef.api.json"
 VISUAL_WORKFLOW_FILENAME = "DS_qwen_scene_multiangle_visual.json"
@@ -57,7 +67,7 @@ def load_base_prompt() -> dict[str, Any]:
     path = workflow_path()
     if not path.exists():
         raise FileNotFoundError(f"Workflow API JSON not found: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return load_json_file(path)
 
 
 def parse_angle_lines(angle_prompts: str) -> list[str]:
@@ -170,6 +180,31 @@ def labels_for_lines(lines: list[str], *, scene_name: str = "") -> dict[str, str
     }
 
 
+def _inject_moge_views(prompt: dict[str, Any], extra_images: dict[str, str]) -> int:
+    encode = (prompt.get(NODE_POSITIVE_ENCODE) or {}).get("inputs")
+    if not isinstance(encode, dict):
+        return 0
+    for key in ("image2", "image3"):
+        encode.pop(key, None)
+    count = 0
+    for key, nid in (
+        ("moge_orbit", NODE_MOGE_ORBIT),
+        ("moge_back", NODE_MOGE_BACK),
+    ):
+        name = extra_images.get(key)
+        if not name:
+            prompt.pop(nid, None)
+            continue
+        prompt[nid] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": name},
+            "_meta": {"title": f"MoGe {key.replace('_', ' ')}"},
+        }
+        encode[f"image{count + 2}"] = [nid, 0]
+        count += 1
+    return count
+
+
 def build_scene_prompt(
     *,
     scene_image_name: str,
@@ -177,6 +212,7 @@ def build_scene_prompt(
     angle_prompts: str = "",
     prepend_text: str = "",
     append_text: str = "",
+    extra_images: dict[str, str] | None = None,
     start_index: int = 0,
     max_rows: int | None = None,
     seed: int | None = None,
@@ -202,8 +238,18 @@ def build_scene_prompt(
     prompt[NODE_ANGLES]["inputs"]["string"] = text
     prompt[NODE_ANGLES]["inputs"]["strip_newlines"] = False
 
+    extras = {
+        key: name
+        for key, name in (extra_images or {}).items()
+        if key in MOGE_EXTRA_KEYS and name
+    }
+    moge_count = _inject_moge_views(prompt, extras)
+
     pl = prompt[NODE_PROMPT_LIST]["inputs"]
-    pl["prepend_text"] = (prepend_text or "").strip() or DEFAULT_PREPEND
+    prepend = (prepend_text or "").strip() or DEFAULT_PREPEND
+    if moge_count and _MOGE_PREPEND.strip() not in prepend:
+        prepend = f"{prepend}{_MOGE_PREPEND}"
+    pl["prepend_text"] = prepend
     pl["append_text"] = append_text or ""
     pl["start_index"] = int(start_index or 0)
     start = max(0, min(int(start_index or 0), len(lines) - 1))

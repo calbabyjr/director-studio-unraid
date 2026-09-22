@@ -8,7 +8,10 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
+from ..core.library.actor_sheet import queue_actor_sheet_update
 from ..core.library.store import (
+    add_actor_voice_sample,
+    add_asset_file,
     assign_asset_project,
     create_external_asset,
     create_external_voice_asset,
@@ -20,6 +23,8 @@ from ..core.library.store import (
 )
 from ..core.projects.store import list_projects, list_shots, save_shot
 from ..core.projects.layouts import RefRole, sync_selected_layout_refs
+from ..core.projects.cast_pack import actor_pack_status
+from ..core.projects.takes import list_actor_takes, pin_actor_take
 from ..core.schemas import LibraryAsset
 
 router = APIRouter(tags=["library"])
@@ -353,6 +358,119 @@ def _invalidate_shots_using_asset(asset: LibraryAsset) -> None:
             meta["material_changes"] = changes
             meta["material_review_pending"] = True
             save_shot(shot.model_copy(update={"meta": meta}))
+
+
+@router.post("/library/actors/{asset_id}/voice", response_model=LibraryAsset)
+async def upload_actor_voice_sample(
+    asset_id: str,
+    file: UploadFile = File(...),
+    name: str = Form(""),
+    notes: str = Form(""),
+) -> LibraryAsset:
+    """Attach a 2–15s voice sample to an Actor and create a linked H3 Voice asset."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "empty file")
+    if len(data) > _MAX_IMPORT_BYTES:
+        raise HTTPException(400, "file too large")
+    try:
+        updated = add_actor_voice_sample(
+            asset_id,
+            audio_bytes=data,
+            audio_filename=file.filename or "voice.wav",
+            name=name,
+            notes=notes,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message else 400
+        raise HTTPException(status, message) from exc
+    _invalidate_shots_using_asset(updated)
+    return updated
+
+
+@router.post("/library/actors/{asset_id}/update-sheet")
+async def update_actor_sheet(asset_id: str):
+    from ..pipelines.actor.schemas import ActorJobResponse
+    from ..pipelines.registry import get_pipeline
+    from ..core.jobs import enrich_job_urls
+
+    try:
+        job = await queue_actor_sheet_update(asset_id)
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message else 400
+        raise HTTPException(status, message) from exc
+    pipe = get_pipeline("actor")
+    job = enrich_job_urls(job, labels=pipe.output_labels)
+    return ActorJobResponse.from_job(job)
+
+
+@router.get("/library/actors/{asset_id}/pack")
+def get_actor_pack(asset_id: str) -> dict:
+    asset = load_asset("actors", asset_id)
+    if asset is None:
+        raise HTTPException(404, "not found")
+    return actor_pack_status(asset)
+
+
+@router.get("/library/actors/{asset_id}/takes")
+def get_actor_takes(asset_id: str) -> dict:
+    asset = load_asset("actors", asset_id)
+    if asset is None:
+        raise HTTPException(404, "not found")
+    pinned = (asset.meta or {}).get("pinned_take_job_id")
+    return {
+        "items": [
+            {
+                "id": job.id,
+                "status": job.status.value,
+                "created_at": job.created_at,
+                "pinned": pinned == job.id,
+            }
+            for job in list_actor_takes(asset_id)
+        ]
+    }
+
+
+@router.post("/library/actors/{asset_id}/takes/{job_id}/pin", response_model=LibraryAsset)
+def post_pin_actor_take(asset_id: str, job_id: str) -> LibraryAsset:
+    try:
+        return pin_actor_take(asset_id, job_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/library/{kind}/{asset_id}/files", response_model=LibraryAsset)
+async def upload_library_asset_file(
+    kind: str,
+    asset_id: str,
+    file: UploadFile = File(...),
+    key: str = Form(""),
+) -> LibraryAsset:
+    if kind not in KINDS:
+        raise HTTPException(400, f"unknown kind: {kind}")
+    if kind == "voices":
+        raise HTTPException(400, "cannot attach images to a Voice asset")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "empty file")
+    if len(data) > _MAX_IMPORT_BYTES:
+        raise HTTPException(400, "file too large")
+    try:
+        updated = add_asset_file(
+            kind,
+            asset_id,
+            data=data,
+            filename=file.filename or "image.png",
+            file_key=key,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message else 400
+        raise HTTPException(status, message) from exc
+    _invalidate_shots_using_asset(updated)
+    return updated
 
 
 @router.patch("/library/{kind}/{asset_id}", response_model=LibraryAsset)

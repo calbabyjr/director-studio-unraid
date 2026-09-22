@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   assembleSequence,
+  cancelProductionQueue,
+  getProductionQueue,
   getSequence,
   sequenceExportUrl,
+  startProductionQueue,
+  type ProductionQueue,
   type SequenceClipStatus,
   type SequenceReport,
 } from "./sequenceApi";
@@ -28,6 +32,10 @@ export function SequencePanel({
   const [report, setReport] = useState<SequenceReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [queue, setQueue] = useState<ProductionQueue | null>(null);
+  const [chainTailFrames, setChainTailFrames] = useState(true);
+  const assemblingRef = useRef(false);
+  const assembleAttemptRef = useRef("");
 
   const refresh = useCallback(async (id: string) => {
     const next = await getSequence(id);
@@ -43,21 +51,36 @@ export function SequencePanel({
       return;
     }
     let cancelled = false;
-    getSequence(projectId)
-      .then((next) => {
-        if (!cancelled) {
-          setReport(next);
-          setError(null);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setReport(null);
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      });
+    const tick = () => {
+      getSequence(projectId)
+        .then((next) => {
+          if (!cancelled) {
+            setReport(next);
+            setError(null);
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setReport(null);
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        });
+    };
+    tick();
+    const timer = window.setInterval(tick, 3000);
+    const pollQueue = () => {
+      getProductionQueue(projectId)
+        .then((next) => {
+          if (!cancelled) setQueue(next);
+        })
+        .catch(() => undefined);
+    };
+    pollQueue();
+    const queueTimer = window.setInterval(pollQueue, 4000);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
+      window.clearInterval(queueTimer);
     };
   }, [active, projectId]);
 
@@ -75,11 +98,34 @@ export function SequencePanel({
     }
   };
 
-  if (!projectId) return null;
-
   const errors = report?.issues.filter((issue) => issue.severity === "error") ?? [];
   const warnings = report?.issues.filter((issue) => issue.severity === "warning") ?? [];
   const canAssemble = (report?.clips_ready ?? 0) > 0;
+  const readyJobIds = (report?.shots ?? [])
+    .filter((shot) => shot.clip_status === "ready" && shot.clip_job_id)
+    .map((shot) => shot.clip_job_id as string);
+  const assembledJobIds = report?.last_assembly?.clip_job_ids ?? [];
+  const readyJobSignature = readyJobIds.join("|");
+  const assemblyStale =
+    Boolean(report?.last_assembly)
+    && readyJobSignature !== assembledJobIds.join("|");
+
+  useEffect(() => {
+    if (!active || !projectId || !assemblyStale || assemblingRef.current) return;
+    if (assembleAttemptRef.current === readyJobSignature) return;
+    assemblingRef.current = true;
+    assembleAttemptRef.current = readyJobSignature;
+    setBusy(true);
+    assembleSequence(projectId)
+      .then(() => refresh(projectId))
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => {
+        assemblingRef.current = false;
+        setBusy(false);
+      });
+  }, [active, assemblyStale, projectId, readyJobSignature, refresh]);
+
+  if (!projectId) return null;
 
   return (
     <section
@@ -98,11 +144,61 @@ export function SequencePanel({
         <div className="sequence-actions">
           <button
             type="button"
+            className="btn secondary sm"
+            disabled={busy || queue?.status === "running"}
+            onClick={() => {
+              if (!projectId) return;
+              const nextId = report?.shots.find((shot) => shot.clip_status !== "ready")?.shot_id;
+              void startProductionQueue(projectId, {
+                mode: "next",
+                from_shot_id: nextId || null,
+                chain_tail_frames: chainTailFrames,
+              })
+                .then(setQueue)
+                .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            }}
+          >
+            Run next
+          </button>
+          <button
+            type="button"
+            className="btn secondary sm"
+            disabled={busy || queue?.status === "running"}
+            onClick={() => {
+              if (!projectId) return;
+              const nextId = report?.shots.find((shot) => shot.clip_status !== "ready")?.shot_id;
+              void startProductionQueue(projectId, {
+                mode: "remaining",
+                from_shot_id: nextId || null,
+                chain_tail_frames: chainTailFrames,
+              })
+                .then(setQueue)
+                .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            }}
+          >
+            Run remaining
+          </button>
+          {queue?.status === "running" ? (
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={() => {
+                if (!projectId) return;
+                void cancelProductionQueue(projectId)
+                  .then(setQueue)
+                  .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+              }}
+            >
+              Stop queue
+            </button>
+          ) : null}
+          <button
+            type="button"
             className="btn primary sm"
             disabled={busy || !canAssemble}
             onClick={() => void onAssemble()}
           >
-            {busy ? "Assembling…" : "Assemble rough cut"}
+            {busy ? "Updating…" : assemblyStale ? "Update rough cut" : "Assemble rough cut"}
           </button>
           <a className="btn secondary sm" href={sequenceExportUrl(projectId, "srt")}>
             SRT
@@ -115,8 +211,33 @@ export function SequencePanel({
           </a>
         </div>
       </div>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={chainTailFrames}
+          disabled={busy || queue?.status === "running"}
+          onChange={(event) => setChainTailFrames(event.target.checked)}
+        />
+        <span>Chain tail frame into next shot</span>
+      </label>
+
+      {queue?.status === "running" ? (
+        <p className="muted tiny" role="status">
+          Queue {queue.mode} · current {queue.current_shot_id || "—"} · {queue.pending_shot_ids.length} waiting
+        </p>
+      ) : null}
+      {queue?.status === "failed" && queue.error ? (
+        <div className="banner error">{queue.error}</div>
+      ) : null}
 
       {error ? <div className="banner error">{error}</div> : null}
+
+      {assemblyStale ? (
+        <p className="muted tiny" role="status">
+          New clips since the last rough cut
+          {readyJobIds.length ? ` · ${readyJobIds.length} ready` : ""}. Updating…
+        </p>
+      ) : null}
 
       {report?.last_assembly ? (
         <div className="sequence-assembly">

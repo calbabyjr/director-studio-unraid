@@ -184,6 +184,7 @@ export function LibraryOverview({ onSelectKind }: {
           onEdit={() => setEditingAsset(detailAsset)}
           onMoveToCostumes={detailAsset.kind === "props" ? () => void onMoveToCostumes(detailAsset) : undefined}
           onDelete={() => void onDeleteAsset(detailAsset)}
+          onUpdated={onMetadataSaved}
         />
       ) : null}
       {editingAsset ? (

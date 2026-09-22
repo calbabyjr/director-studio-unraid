@@ -55,7 +55,9 @@ def test_director_max_tool_turns_defaults_above_picture_review_depth(
 ) -> None:
     configured = Settings(_env_file=None, data_dir=tmp_path)
 
-    assert configured.director_max_tool_turns == 16
+    assert configured.director_max_tool_turns == 32
+    assert configured.director_memory_check_enabled is True
+    assert configured.director_memory_check_sec == 1800
 
 
 def test_director_max_tool_turns_can_be_configured_from_environment(

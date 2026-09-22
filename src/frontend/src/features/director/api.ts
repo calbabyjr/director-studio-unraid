@@ -48,6 +48,27 @@ export async function getDirectorVramStatus(): Promise<DirectorVramStatus> {
   return res.json();
 }
 
+export async function cancelDirectorJob(jobId: string): Promise<void> {
+  const res = await fetch(`/api/director/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+  });
+  if (!res.ok) throw await directorResponseError(res);
+}
+
+export interface DirectorPatrolStatus {
+  enabled: boolean;
+  interval_sec: number;
+  last_run_at: string | null;
+  next_at: string | null;
+  projects: Record<string, { count?: number; posted_at?: string; soul_id?: string }>;
+}
+
+export async function getDirectorPatrol(): Promise<DirectorPatrolStatus> {
+  const res = await fetch("/api/director/patrol");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export interface LayoutBrief {
   purpose: string;
   state_description: string;
@@ -181,6 +202,93 @@ export async function deleteDirectorSoul(soulId: string): Promise<void> {
   if (!res.ok) throw new Error(await parseError(res));
 }
 
+export type WorkspaceScope = "global" | "project";
+
+export interface WorkspaceFile {
+  name: string;
+  scope: WorkspaceScope;
+  markdown: string;
+  reserved: boolean;
+  placeholder: boolean;
+  updated_at: string;
+}
+
+function workspaceQuery(
+  scope: WorkspaceScope,
+  projectId?: string | null,
+  soulId?: string | null,
+): string {
+  const params = new URLSearchParams({ scope });
+  if (scope === "project" && projectId) params.set("project_id", projectId);
+  if (soulId) params.set("soul_id", soulId);
+  return params.toString();
+}
+
+export async function listWorkspaceFiles(
+  scope: WorkspaceScope = "global",
+  projectId?: string | null,
+  soulId?: string | null,
+): Promise<WorkspaceFile[]> {
+  const res = await fetch(`/api/workspace?${workspaceQuery(scope, projectId, soulId)}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function createWorkspaceFile(body: {
+  name: string;
+  markdown?: string;
+  scope?: WorkspaceScope;
+  projectId?: string | null;
+  soulId?: string | null;
+}): Promise<WorkspaceFile> {
+  const res = await fetch("/api/workspace", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: body.name,
+      markdown: body.markdown || "",
+      scope: body.scope || "global",
+      project_id: body.projectId || undefined,
+      soul_id: body.soulId || undefined,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function saveWorkspaceFile(
+  name: string,
+  markdown: string,
+  scope: WorkspaceScope = "global",
+  projectId?: string | null,
+  soulId?: string | null,
+): Promise<WorkspaceFile> {
+  const res = await fetch(`/api/workspace/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      markdown,
+      scope,
+      project_id: projectId || undefined,
+      soul_id: soulId || undefined,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function deleteWorkspaceFile(
+  name: string,
+  scope: WorkspaceScope = "global",
+  projectId?: string | null,
+  soulId?: string | null,
+): Promise<void> {
+  const res = await fetch(`/api/workspace/${encodeURIComponent(name)}?${workspaceQuery(scope, projectId, soulId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
 export async function getDirectorMemory(projectId: string): Promise<DirectorMemoryNote[]> {
   const res = await fetch(`/api/projects/${projectId}/memory`);
   if (!res.ok) throw new Error(await parseError(res));
@@ -211,6 +319,47 @@ export async function deleteDirectorMemoryNote(
     { method: "DELETE" },
   );
   if (!res.ok) throw new Error(await parseError(res));
+}
+
+export interface DirectorMemoryDocument {
+  scope: WorkspaceScope;
+  markdown: string;
+  placeholder: boolean;
+  soul_id?: string | null;
+  updated_at: string | null;
+}
+
+export async function getDirectorMemoryDocument(
+  scope: WorkspaceScope = "global",
+  projectId?: string | null,
+  soulId?: string | null,
+): Promise<DirectorMemoryDocument> {
+  const params = new URLSearchParams({ scope });
+  if (scope === "project" && projectId) params.set("project_id", projectId);
+  if (soulId) params.set("soul_id", soulId);
+  const res = await fetch(`/api/memory/document?${params}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function saveDirectorMemoryDocument(
+  markdown: string,
+  scope: WorkspaceScope = "global",
+  projectId?: string | null,
+  soulId?: string | null,
+): Promise<DirectorMemoryDocument> {
+  const res = await fetch("/api/memory/document", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      markdown,
+      scope,
+      project_id: projectId || undefined,
+      soul_id: soulId || undefined,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
 }
 
 export async function getDirectorChatHistory(projectId: string): Promise<ChatMessage[]> {
@@ -499,6 +648,16 @@ export async function getShot(shotId: string): Promise<Shot> {
 }
 
 export type ShotMaterialSelection = Pick<ShotRef, "role" | "asset_id" | "file_key">;
+
+export async function castActorOnShot(shotId: string, actorId: string): Promise<Shot> {
+  const res = await fetch(`/api/shots/${encodeURIComponent(shotId)}/cast-actor`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor_id: actorId }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
 
 export async function replaceShotMaterials(
   shotId: string,

@@ -1,5 +1,6 @@
 import { PageShell } from "../../shared/components/PageShell";
 import { H3WorkflowSetup } from "./H3WorkflowSetup";
+import { UserProfileSetup } from "./UserProfileSetup";
 
 export function WorkflowSettingsPage({
   active = true,
@@ -11,7 +12,7 @@ export function WorkflowSettingsPage({
   return (
     <PageShell
       title="Settings"
-      subtitle="Workflows / H3"
+      subtitle="You and H3"
       className="workflow-settings-page"
       actions={onClose ? (
         <button
@@ -25,6 +26,7 @@ export function WorkflowSettingsPage({
         </button>
       ) : null}
     >
+      <UserProfileSetup />
       <H3WorkflowSetup active={active} />
     </PageShell>
   );

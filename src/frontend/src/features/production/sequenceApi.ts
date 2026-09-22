@@ -76,6 +76,70 @@ export async function getSequence(projectId: string): Promise<SequenceReport> {
   return res.json();
 }
 
+export interface ProductionQueue {
+  project_id: string;
+  mode: "next" | "remaining";
+  status: "idle" | "running" | "failed";
+  current_shot_id: string | null;
+  current_job_id: string | null;
+  pending_shot_ids: string[];
+  completed_shot_ids: string[];
+  chain_tail_frames: boolean;
+  error: string | null;
+  updated_at: string;
+}
+
+export async function getProductionQueue(projectId: string): Promise<ProductionQueue> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/production/queue`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function startProductionQueue(
+  projectId: string,
+  body: {
+    mode: "next" | "remaining";
+    from_shot_id?: string | null;
+    chain_tail_frames?: boolean;
+  },
+): Promise<ProductionQueue> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/production/queue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function cancelProductionQueue(projectId: string): Promise<ProductionQueue> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/production/queue/cancel`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function listShotTakes(
+  projectId: string,
+  shotId: string,
+): Promise<{ items: { id: string; status: string; created_at: string; pinned: boolean }[] }> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/takes`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function pinShotTake(projectId: string, shotId: string, jobId: string): Promise<unknown> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/takes/${encodeURIComponent(jobId)}/pin`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export async function assembleSequence(
   projectId: string,
 ): Promise<SequenceAssembly> {

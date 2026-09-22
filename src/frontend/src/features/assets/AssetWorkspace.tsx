@@ -27,14 +27,9 @@ const IMPORT_LABELS: Record<PreparedAssetCategory, string> = {
   voices: "voice",
 };
 
-const IMPORT_ONLY = new Set<PreparedAssetCategory>(["costumes", "voices"]);
+const IMPORT_ONLY = new Set<PreparedAssetCategory>(["voices"]);
 
-const IMPORT_ONLY_COPY: Record<"costumes" | "voices", { kicker: string; title: string; body: string }> = {
-  costumes: {
-    kicker: "Costume preparation",
-    title: "Import a clean wardrobe reference",
-    body: "A front or three-view costume photo gives the Director a Picture it can bind as wardrobe on any Shot.",
-  },
+const IMPORT_ONLY_COPY: Record<"voices", { kicker: string; title: string; body: string }> = {
   voices: {
     kicker: "Voice preparation",
     title: "Import a clean performance sample",
@@ -79,9 +74,11 @@ export function AssetWorkspace() {
         </nav>
 
         <section className="asset-category-content" aria-live="polite">
-          <div className="asset-library-overview-panel" hidden={category !== "library"}>
-            <LibraryOverview onSelectKind={setCategory} />
-          </div>
+          {category === "library" ? (
+            <div className="asset-library-overview-panel">
+              <LibraryOverview onSelectKind={setCategory} />
+            </div>
+          ) : null}
           {CATEGORIES.filter((item) => item.id !== "library").map((item) => {
             const workflowCategory = item.id as PreparedAssetCategory;
             return (
@@ -104,11 +101,14 @@ export function AssetWorkspace() {
               {workflowCategory === "actors" ? <CastingPage onOpenLibrary={() => setCategory("library")} /> : null}
               {workflowCategory === "scenes" ? <SetDesignPage onOpenLibrary={() => setCategory("library")} /> : null}
               {workflowCategory === "props" ? <PropsPage onOpenLibrary={() => setCategory("library")} /> : null}
-              {workflowCategory === "costumes" || workflowCategory === "voices" ? (
+              {workflowCategory === "costumes" ? (
+                <PropsPage kind="costume" onOpenLibrary={() => setCategory("library")} />
+              ) : null}
+              {workflowCategory === "voices" ? (
                 <div className="asset-guidance-card">
-                  <div className="workspace-kicker">{IMPORT_ONLY_COPY[workflowCategory].kicker}</div>
-                  <h2>{IMPORT_ONLY_COPY[workflowCategory].title}</h2>
-                  <p>{IMPORT_ONLY_COPY[workflowCategory].body}</p>
+                  <div className="workspace-kicker">{IMPORT_ONLY_COPY.voices.kicker}</div>
+                  <h2>{IMPORT_ONLY_COPY.voices.title}</h2>
+                  <p>{IMPORT_ONLY_COPY.voices.body}</p>
                 </div>
               ) : null}
             </div>

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import struct
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -28,6 +30,9 @@ from .workflow import DEFAULT_ANGLES
 router = APIRouter(tags=["scenes"])
 
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+_GLB_EXT = {".glb"}
+_GLB_MAX_MB = 256
+_GLB_MAX_BYTES = _GLB_MAX_MB * 1024 * 1024
 
 
 async def _read_image(upload: UploadFile | None, field: str) -> tuple[str, bytes] | None:
@@ -46,6 +51,21 @@ async def _read_image(upload: UploadFile | None, field: str) -> tuple[str, bytes
     return filename, data
 
 
+async def _read_glb(upload: UploadFile | None) -> tuple[str, bytes] | None:
+    if upload is None:
+        return None
+    filename = upload.filename or "mesh.glb"
+    ext = Path(filename).suffix.lower()
+    if ext and ext not in _GLB_EXT:
+        raise HTTPException(400, "moge_glb: upload a MoGe .glb mesh")
+    data = await upload.read()
+    if not data:
+        raise HTTPException(400, "moge_glb: empty file")
+    if len(data) > _GLB_MAX_BYTES:
+        raise HTTPException(400, f"moge_glb: file exceeds {_GLB_MAX_MB}MB")
+    return filename, data
+
+
 def _to_response(job) -> SceneJobResponse:
     pipe = get_pipeline("scene")
     labels = pipe.labels_for_job(job) if hasattr(pipe, "labels_for_job") else pipe.output_labels
@@ -58,6 +78,7 @@ async def scene_defaults() -> dict:
     pipe = get_pipeline("scene")
     meta = pipe.meta_defaults()
     meta["max_upload_mb"] = settings.max_upload_mb
+    meta["max_moge_glb_mb"] = _GLB_MAX_MB
     meta["default_angles"] = DEFAULT_ANGLES
     return meta
 
@@ -75,14 +96,32 @@ async def generate_scene(
     fixed_seed: bool = Form(False),
     project_id: str = Form(""),
     scene_image: UploadFile | None = File(None),
+    moge_glb: UploadFile | None = File(None),
+    moge_from_plate: bool = Form(False),
 ) -> SceneJobResponse:
     name = (name or "").strip()
     if not name:
         raise HTTPException(400, "name is required")
 
     scene_img = await _read_image(scene_image, "scene_image")
+    glb = await _read_glb(moge_glb)
+    moge_views: dict[str, tuple[str, bytes]] = {}
+    if glb:
+        from ...core.media.glb_views import GlbError, render_moge_views
+
+        try:
+            rendered = await asyncio.to_thread(render_moge_views, glb[1])
+        except (GlbError, OSError, MemoryError, struct.error, ValueError) as exc:
+            raise HTTPException(400, f"moge_glb: {exc}") from exc
+        moge_views = {
+            "moge_orbit": ("moge_orbit.png", rendered["orbit"]),
+            "moge_back": ("moge_back.png", rendered["back"]),
+        }
+        if scene_img is None:
+            scene_img = ("moge_front.png", rendered["front"])
+    run_moge_from_plate = bool(moge_from_plate) and scene_img is not None and not moge_views
     if not scene_img:
-        raise HTTPException(400, "scene_image is required")
+        raise HTTPException(400, "scene_image or moge_glb is required")
 
     angles = (angle_prompts or "").strip() or DEFAULT_ANGLES
     if not any(ln.strip() for ln in angles.splitlines()):
@@ -115,13 +154,20 @@ async def generate_scene(
             "append_text": append_text or "",
             "start_index": start_index,
             "max_rows": max_rows_val,
+            "has_moge_glb": bool(glb),
+            "moge_from_plate": run_moge_from_plate,
         },
         seed=seed_val,
         fixed_seed=fixed_seed,
         project_id=proj,
     )
 
-    job = await start_pipeline_job(job, images={"scene": scene_img})
+    images: dict[str, tuple[str, bytes]] = {"scene": scene_img, **moge_views}
+    if glb:
+        from ...core.jobs.store import save_input_file
+
+        save_input_file(job.id, "moge_glb", glb[0], glb[1], project_id=proj)
+    job = await start_pipeline_job(job, images=images)
     # build_prompt mutates used_angles on the in-memory job during run; after start
     # the runner reloads — ensure used_angles saved after first build by re-saving params
     # The runner calls build_prompt which sets job.params["used_angles"] then only

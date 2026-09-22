@@ -40,6 +40,48 @@ export async function generateProp(form: FormData): Promise<PropJobRecord> {
   return res.json();
 }
 
+export async function generateCostume(form: FormData): Promise<PropJobRecord> {
+  const res = await fetch("/api/costumes/generate", { method: "POST", body: form });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function getCostumeJob(jobId: string): Promise<PropJobRecord> {
+  const res = await fetch(`/api/costumes/jobs/${jobId}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function cancelCostumeJob(jobId: string): Promise<PropJobRecord> {
+  const res = await fetch(`/api/costumes/jobs/${jobId}/cancel`, { method: "POST" });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function saveCostumeJob(
+  jobId: string,
+  body?: { name?: string; notes?: string; project_id?: string | null },
+): Promise<PropRecord> {
+  const res = await fetch(`/api/costumes/jobs/${jobId}/save`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function listCostumeJobs(
+  projectId?: string | null,
+  limit = 20,
+): Promise<PropJobRecord[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (projectId) params.set("project_id", projectId);
+  const res = await fetch(`/api/costumes/jobs?${params}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export async function getPropJob(jobId: string): Promise<PropJobRecord> {
   const res = await fetch(`/api/props/jobs/${jobId}`);
   if (!res.ok) throw new Error(await parseError(res));

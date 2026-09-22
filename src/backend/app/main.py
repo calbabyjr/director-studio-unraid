@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 
 from fastapi import FastAPI
@@ -22,12 +23,27 @@ logger = logging.getLogger("director_studio")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    patrol_task: asyncio.Task | None = None
     try:
         recovered = await recover_interrupted_jobs()
         if recovered:
             logger.info("recovered %d interrupted jobs on startup", len(recovered))
+        if getattr(settings, "director_memory_check_enabled", True):
+            from .core.projects.director_patrol import memory_patrol_loop
+
+            patrol_task = asyncio.create_task(memory_patrol_loop())
+            logger.info(
+                "director memory patrol every %ss",
+                getattr(settings, "director_memory_check_sec", 1800),
+            )
         yield
     finally:
+        if patrol_task is not None:
+            patrol_task.cancel()
+            try:
+                await patrol_task
+            except asyncio.CancelledError:
+                pass
         await close_execution_runtimes()
 
 

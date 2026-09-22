@@ -15,6 +15,29 @@ from ..core.vram import get_director_model, get_orchestrator
 
 logger = logging.getLogger("director_studio.api.director")
 
+
+async def _comfy_queue_snapshot() -> dict[str, int | str | None]:
+    import httpx
+
+    empty = {"running": 0, "pending": 0, "prompt_id": None}
+    try:
+        async with httpx.AsyncClient(trust_env=False, timeout=1.5) as client:
+            response = await client.get(str(settings.comfy_base_url).rstrip("/") + "/queue")
+            response.raise_for_status()
+            payload = response.json()
+    except Exception:
+        return empty
+    running = payload.get("queue_running") or []
+    pending = payload.get("queue_pending") or []
+    prompt_id = None
+    if running:
+        first = running[0]
+        if isinstance(first, (list, tuple)) and len(first) > 1:
+            prompt_id = str(first[1])
+        elif isinstance(first, dict):
+            prompt_id = str(first.get("prompt_id") or first.get("prompt") or "") or None
+    return {"running": len(running), "pending": len(pending), "prompt_id": prompt_id}
+
 router = APIRouter(tags=["director"])
 
 
@@ -175,6 +198,27 @@ async def wake_director(body: WakeBody | None = None) -> WakeResponse:
     )
 
 
+@router.get("/director/patrol")
+async def get_memory_patrol() -> dict:
+    from ..core.projects.director_patrol import patrol_status
+
+    return patrol_status()
+
+
+@router.post("/director/patrol")
+async def run_memory_patrol() -> dict:
+    from ..core.projects.director_patrol import run_patrol
+
+    report = run_patrol()
+    return report.model_dump(mode="json")
+
+
+def _active_director_chats() -> list[dict]:
+    from ..core.projects.chat_sessions import director_chat_sessions
+
+    return director_chat_sessions.list_active()
+
+
 @router.get("/director/vram")
 async def vram_status() -> dict:
     orch = get_orchestrator()
@@ -255,12 +299,29 @@ async def vram_status() -> dict:
         ],
         "queue_waiters": getattr(orch, "_waiters", 0),
         "chat_locked": bool(reservations),
+        "director_chats": _active_director_chats(),
+        "director_working": bool(_active_director_chats()),
         "generation_count": len(reservations),
         "generation_jobs": [asdict(item) for item in reservations],
         "acquire_timeout_sec": orch.acquire_timeout_sec,
         "last_comfy_free": getattr(orch, "last_comfy_free", None),
         "last_comfy_free_error": getattr(orch, "last_comfy_free_error", None),
+        "comfy_queue": await _comfy_queue_snapshot(),
+        "cancel_job_id": reservations[0].job_id if reservations else None,
     }
+
+
+@router.post("/director/jobs/{job_id}/cancel")
+async def cancel_director_job(job_id: str) -> dict:
+    from ..core.jobs import cancel_job, load_job
+
+    job = load_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    updated = await cancel_job(job_id)
+    if updated is None:
+        raise HTTPException(404, "Job not found")
+    return {"ok": True, "id": updated.id, "status": updated.status.value}
 
 
 @router.post("/director/free-comfy")

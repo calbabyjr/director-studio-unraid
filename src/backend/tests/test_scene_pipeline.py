@@ -12,6 +12,9 @@ from app.pipelines.scene.workflow import (
     NODE_PROMPT_LIST,
     NODE_SAMPLER,
     NODE_SAVE,
+    NODE_MOGE_BACK,
+    NODE_MOGE_ORBIT,
+    NODE_POSITIVE_ENCODE,
     VISUAL_WORKFLOW_FILENAME,
     WORKFLOW_FILENAME,
     build_scene_prompt,
@@ -71,6 +74,20 @@ def test_explicit_prepend_overrides_default():
         prepend_text="night interior, tungsten practicals",
     )
     assert prompt[NODE_PROMPT_LIST]["inputs"]["prepend_text"] == "night interior, tungsten practicals"
+
+
+def test_build_scene_prompt_wires_moge_extra_cameras():
+    prompt, _, _, _ = build_scene_prompt(
+        scene_image_name="plate.png",
+        extra_images={"moge_orbit": "orbit.png", "moge_back": "back.png"},
+    )
+    encode = prompt[NODE_POSITIVE_ENCODE]["inputs"]
+    assert encode["image1"] == ["107", 0]
+    assert encode["image2"] == [NODE_MOGE_ORBIT, 0]
+    assert encode["image3"] == [NODE_MOGE_BACK, 0]
+    assert prompt[NODE_MOGE_ORBIT]["inputs"]["image"] == "orbit.png"
+    assert prompt[NODE_MOGE_BACK]["inputs"]["image"] == "back.png"
+    assert "MoGe 3D mesh" in prompt[NODE_PROMPT_LIST]["inputs"]["prepend_text"] or "MoGe" in prompt[NODE_PROMPT_LIST]["inputs"]["prepend_text"]
 
 
 def test_scene_api_and_visual_workflows_exist():

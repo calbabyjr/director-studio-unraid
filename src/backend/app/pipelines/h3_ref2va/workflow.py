@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from ...config import settings
+from ...core.json_cache import load_json_file
 from ...core.h3.frames import validate_frame_count
 from ...core.h3.prompt import validate_h3_prompt
 from ...core.schemas import ComfyImageRef
@@ -85,7 +86,7 @@ def load_base_prompt() -> dict[str, Any]:
     path = settings.workflows_dir / WORKFLOW_FILENAME
     if not path.exists():
         raise FileNotFoundError(f"Workflow API JSON not found: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return load_json_file(path)
 
 
 def _node_ids_by_class(graph: dict[str, Any], class_type: str) -> list[str]:

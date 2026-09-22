@@ -44,6 +44,8 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
   const [prepend, setPrepend] = useState("");
   const [append, setAppend] = useState("");
   const [sceneImg, setSceneImg] = useState<LocalImage | null>(null);
+  const [mogeGlb, setMogeGlb] = useState<File | null>(null);
+  const [mogeFromPlate, setMogeFromPlate] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [fixedSeed, setFixedSeed] = useState(false);
   const [seed, setSeed] = useState("");
@@ -75,6 +77,8 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
     setPrepend(defaults?.default_prepend || "");
     setAppend(defaults?.default_append || "");
     setSceneImg(null);
+    setMogeGlb(null);
+    setMogeFromPlate(false);
     setAdvancedOpen(false);
     setFixedSeed(false);
     setSeed("");
@@ -135,7 +139,7 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
   const validate = (): boolean => {
     const err: Record<string, string> = {};
     if (!name.trim()) err.name = "Name is required";
-    if (!sceneImg) err.scene = "Scene reference image is required";
+    if (!sceneImg && !mogeGlb) err.scene = "Scene image or MoGe .glb is required";
     if (angleCount < 1) err.angles = "Add at least one angle line";
     if (fixedSeed && seed && Number.isNaN(Number(seed))) err.seed = "Seed must be an integer";
     setFieldErrors(err);
@@ -162,6 +166,8 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
       fd.set("project_id", projectId);
       if (fixedSeed && seed.trim()) fd.set("seed", seed.trim());
       if (sceneImg) fd.set("scene_image", sceneImg.file, sceneImg.file.name);
+      if (mogeGlb) fd.set("moge_glb", mogeGlb, mogeGlb.name);
+      fd.set("moge_from_plate", mogeFromPlate && sceneImg ? "true" : "false");
       setJob(await generateScene(fd));
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
@@ -205,6 +211,8 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
     setName("");
     setNotes("");
     setSceneImg(null);
+    setMogeGlb(null);
+    setMogeFromPlate(false);
     setDisabledAngleIndexes(new Set());
     setFixedSeed(false);
     setSeed("");
@@ -257,9 +265,9 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
             <div className="banner error">Select a project in the header before generating scenes.</div>
           )}
           <p className="field-hint" style={{ marginBottom: "1rem" }}>
-            Upload one scene plate. 1728×960 quality mode re-shoots seven selectable views with
-            Qwen Edit 2511 multi-angle LoRA. The original plate is saved as master for H3. Filenames
-            use your scene name + view, e.g.{" "}
+            Upload a scene plate and optionally a MoGe .glb. 1728×960 quality mode re-shoots the
+            selected views with Qwen Edit 2511 multi-angle LoRA. Extra cameras from the mesh help
+            Qwen keep the same set. Filenames use your scene name + view, e.g.{" "}
             <code>{name.trim() || "SceneName"}_01_left_side_view_h270_v0.png</code>.
           </p>
 
@@ -287,13 +295,47 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
             <div className="block-title">2. Scene reference</div>
             <ImageUploadSlot
               label="Scene image"
-              required
+              required={!mogeGlb}
               hint="Single set / environment still. Multi-angle LoRA keeps layout while changing camera."
               value={sceneImg}
-              onChange={setSceneImg}
+              onChange={(img) => {
+                setSceneImg(img);
+                if (!img) setMogeFromPlate(false);
+              }}
               disabled={isRunning}
               error={fieldErrors.scene}
             />
+            <label className="field">
+              <span>MoGe 3D mesh</span>
+              <input
+                type="file"
+                accept=".glb,model/gltf-binary"
+                disabled={isRunning}
+                aria-label="MoGe 3D mesh"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  setMogeGlb(file);
+                  event.target.value = "";
+                }}
+              />
+              {mogeGlb ? (
+                <span className="muted tiny">
+                  {mogeGlb.name} ({(mogeGlb.size / (1024 * 1024)).toFixed(1)} MB)
+                </span>
+              ) : null}
+              <span className="field-hint">
+                Optional textured .glb from MoGe (up to {defaults?.max_moge_glb_mb || 256} MB). Extra cameras of the mesh go into Qwen with the plate.
+              </span>
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={mogeFromPlate}
+                disabled={isRunning || !sceneImg}
+                onChange={(event) => setMogeFromPlate(event.target.checked)}
+              />
+              <span>Estimate geometry from this plate (MoGe depth + normals)</span>
+            </label>
           </div>
 
           <div className="block">
@@ -390,7 +432,7 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
           <div className="actions">
             {!isRunning ? (
               <button type="button" className="btn primary" disabled={busy} onClick={onGenerate}>
-                {busy ? "Submitting…" : `Generate ${angleCount || ""} Angles`}
+                {busy ? (mogeGlb ? "Reading mesh…" : "Submitting…") : `Generate ${angleCount || ""} Angles`}
               </button>
             ) : (
               <button type="button" className="btn danger" onClick={onCancel}>
@@ -418,6 +460,23 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
               Each non-empty angle line produces one image in a single Comfy batch. Results appear as a multi-view
               set for the library.
             </p>
+          ) : null}
+
+          {job?.input_previews?.moge_orbit || job?.input_previews?.moge_back ? (
+            <div className="upload-row extra-actor-views">
+              {job.input_previews.moge_orbit ? (
+                <figure className="upload-slot">
+                  <div className="upload-slot-header">MoGe orbit</div>
+                  <img src={job.input_previews.moge_orbit} alt="MoGe orbit camera" />
+                </figure>
+              ) : null}
+              {job.input_previews.moge_back ? (
+                <figure className="upload-slot">
+                  <div className="upload-slot-header">MoGe back</div>
+                  <img src={job.input_previews.moge_back} alt="MoGe back camera" />
+                </figure>
+              ) : null}
+            </div>
           ) : null}
 
           {job?.error && (job.status === "failed" || job.status === "cancelled") ? (

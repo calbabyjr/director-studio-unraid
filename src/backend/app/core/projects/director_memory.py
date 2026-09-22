@@ -47,9 +47,14 @@ def project_memory_path(project_id: str) -> Path:
     return settings.projects_dir / project_id / "agent" / "memory.json"
 
 
-def global_memory_path() -> Path:
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    return settings.data_dir / "director_memory.json"
+def global_memory_path(soul_id: str | None = None, project_id: str | None = None) -> Path:
+    from ..souls.store import ensure_builtin_souls, resolve_soul_id, soul_dir
+
+    ensure_builtin_souls()
+    slug = resolve_soul_id(soul_id, project_id)
+    path = soul_dir(slug) / "memory.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _load(path: Path) -> DirectorMemory:
@@ -80,18 +85,25 @@ def _clip(text: str) -> str:
     return cleaned[: MAX_NOTE_CHARS - 1].rstrip() + "…"
 
 
-def _path_for_scope(project_id: str | None, scope: Scope) -> Path:
+def _path_for_scope(
+    project_id: str | None,
+    scope: Scope,
+    soul_id: str | None = None,
+) -> Path:
     if scope == "global":
-        return global_memory_path()
+        return global_memory_path(soul_id, project_id)
     if not project_id:
         raise ValueError("project_id is required for project memory")
     return project_memory_path(project_id)
 
 
-def load_notes(project_id: str | None = None) -> list[DirectorMemoryNote]:
+def load_notes(
+    project_id: str | None = None,
+    soul_id: str | None = None,
+) -> list[DirectorMemoryNote]:
     if project_id:
         _bootstrap_from_history(project_id)
-    notes = list(_load(global_memory_path()).notes)
+    notes = list(_load(global_memory_path(soul_id, project_id)).notes)
     if project_id:
         notes.extend(_load(project_memory_path(project_id)).notes)
     return notes
@@ -114,14 +126,16 @@ def add_note(
     scope: Scope = "project",
     source: Source = "user",
     project_id: str | None = None,
+    soul_id: str | None = None,
 ) -> DirectorMemoryNote:
     clipped = _clip(text)
     if len(clipped) < 8:
         raise ValueError("memory note is too short")
-    path = _path_for_scope(project_id, scope)
+    path = _path_for_scope(project_id, scope, soul_id)
     memory = _load(path)
     duplicate = _deduped(memory.notes, clipped)
     if duplicate is not None:
+        _promote_permanent(duplicate.text, scope=scope, project_id=project_id, soul_id=soul_id)
         return duplicate
     while len(memory.notes) >= MAX_NOTES_PER_SCOPE:
         auto_idx = next(
@@ -140,14 +154,21 @@ def add_note(
     )
     memory.notes.append(note)
     _save(path, memory)
+    _promote_permanent(note.text, scope=scope, project_id=project_id, soul_id=soul_id)
+    _journal_permanent(note.text, scope=scope, source=source, project_id=project_id, soul_id=soul_id)
     return note
 
 
-def forget_note(note_id: str, *, project_id: str | None = None) -> DirectorMemoryNote | None:
+def forget_note(
+    note_id: str,
+    *,
+    project_id: str | None = None,
+    soul_id: str | None = None,
+) -> DirectorMemoryNote | None:
     token = (note_id or "").strip()
     if not token:
         return None
-    paths = [global_memory_path()]
+    paths = [global_memory_path(soul_id, project_id)]
     if project_id:
         paths.insert(0, project_memory_path(project_id))
     needle = _normalize(token).lower()
@@ -164,19 +185,28 @@ def forget_note(note_id: str, *, project_id: str | None = None) -> DirectorMemor
             kept.append(note)
         if removed is not None:
             _save(path, DirectorMemory(notes=kept))
+            _retract_permanent(
+                removed.text,
+                scope=removed.scope,
+                project_id=project_id,
+                soul_id=soul_id,
+            )
             return removed
     return None
 
 
-def memory_prompt_block(project_id: str) -> str:
+def memory_prompt_block(project_id: str, *, skip_corpus: str = "") -> str:
     notes = load_notes(project_id)
     if not notes:
         return ""
+    skip = (skip_corpus or "").lower()
     lines = [
         "STANDING_NOTES (persist across sessions; follow unless the user overrides this turn):"
     ]
     used = 0
     for note in notes:
+        if skip and _normalize(note.text).lower() in skip:
+            continue
         label = "all projects" if note.scope == "global" else "this project"
         line = f"- [{label}] {note.text}"
         if used + len(line) + 1 > MAX_PROMPT_CHARS:
@@ -189,10 +219,73 @@ def memory_prompt_block(project_id: str) -> str:
 
 
 def apply_memory_to_system(system: str, project_id: str) -> str:
-    block = memory_prompt_block(project_id)
-    if not block:
+    from .director_learning import compiled_memory_prompt, memory_text_corpus
+
+    parts = [system.rstrip()]
+    compiled = compiled_memory_prompt(project_id)
+    if compiled:
+        parts.append(compiled)
+    notes = memory_prompt_block(
+        project_id,
+        skip_corpus=memory_text_corpus(project_id) if compiled else "",
+    )
+    if notes:
+        parts.append(notes)
+    if len(parts) == 1:
         return system
-    return f"{system.rstrip()}\n\n{block}"
+    return "\n\n".join(parts)
+
+
+def _promote_permanent(
+    text: str,
+    *,
+    scope: Scope,
+    project_id: str | None,
+    soul_id: str | None = None,
+) -> None:
+    try:
+        from .director_learning import promote_lesson
+
+        promote_lesson(text, scope=scope, project_id=project_id, soul_id=soul_id)
+    except Exception:
+        pass
+
+
+def _retract_permanent(
+    text: str,
+    *,
+    scope: Scope,
+    project_id: str | None,
+    soul_id: str | None = None,
+) -> None:
+    try:
+        from .director_learning import retract_lesson
+
+        retract_lesson(text, scope=scope, project_id=project_id, soul_id=soul_id)
+    except Exception:
+        pass
+
+
+def _journal_permanent(
+    text: str,
+    *,
+    scope: Scope,
+    source: str,
+    project_id: str | None,
+    soul_id: str | None = None,
+) -> None:
+    try:
+        from .director_learning import append_journal
+
+        append_journal(
+            text=text,
+            scope=scope,
+            source=source,
+            project_id=project_id,
+            soul_id=soul_id,
+        )
+    except Exception:
+        pass
 
 
 _SKIP_MESSAGE = re.compile(
@@ -202,6 +295,18 @@ _SKIP_MESSAGE = re.compile(
 _EXPLICIT_REMEMBER = re.compile(
     r"(?:please\s+)?remember(?:\s+that|\s+this)?[:\s]+(.{8,240})",
     re.I,
+)
+_REMEMBER_FUTURE = re.compile(
+    r"remember(?:\s+that|\s+this)?\s+in the future",
+    re.I,
+)
+_WEAK_MEMORY = re.compile(
+    r"^(?:to continue|continue|in the future|remember(?:\s+that|\s+this)?"
+    r"(?:\s+in the future)?)\.?$",
+    re.I,
+)
+_PROCEED_WITHOUT_ASKING = (
+    "When the user says continue or YES, proceed immediately without reconfirming"
 )
 _FROM_NOW_ON = re.compile(
     r"(?:from now on|going forward)[,:\s]+(.{8,240})",
@@ -260,7 +365,7 @@ def extract_memory_candidates(message: str) -> list[str]:
     ):
         for match in pattern.finditer(text):
             candidate = _clip(re.sub(r"^(?:to|that|this)\s+", "", match.group(1), flags=re.I))
-            if len(candidate) < 8:
+            if len(candidate) < 8 or _WEAK_MEMORY.match(candidate):
                 continue
             if pattern is _ALWAYS_NEVER and (
                 _EPHEMERAL.search(candidate) or not _DURABLE_CONSTRAINT.search(candidate)
@@ -275,6 +380,9 @@ def extract_memory_candidates(message: str) -> list[str]:
             continue
         seen.add(key)
         unique.append(item)
+    if _REMEMBER_FUTURE.search(text) and re.search(r"\b(continue|yes|proceed)\b", text, re.I):
+        if _PROCEED_WITHOUT_ASKING.lower() not in seen:
+            unique.append(_PROCEED_WITHOUT_ASKING)
     return unique
 
 

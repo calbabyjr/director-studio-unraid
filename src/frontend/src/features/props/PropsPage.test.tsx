@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PropsPage } from "./PropsPage";
-import { generateProp, listPropJobs } from "./api";
+import { generateCostume, generateProp, listCostumeJobs, listPropJobs } from "./api";
 import type { PropJobRecord } from "./api";
 
 vi.mock("../../shared/project/ProjectContext", () => ({
@@ -19,6 +19,11 @@ vi.mock("./api", () => ({
   cancelPropJob: vi.fn(),
   savePropJob: vi.fn(),
   listPropJobs: vi.fn(),
+  generateCostume: vi.fn(),
+  getCostumeJob: vi.fn(),
+  cancelCostumeJob: vi.fn(),
+  saveCostumeJob: vi.fn(),
+  listCostumeJobs: vi.fn(),
 }));
 
 const finishedPropJob: PropJobRecord = {
@@ -34,6 +39,7 @@ describe("PropsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listPropJobs).mockResolvedValue([]);
+    vi.mocked(listCostumeJobs).mockResolvedValue([]);
   });
 
   it("presents the prop result as a multi-view reference sheet", async () => {
@@ -41,9 +47,9 @@ describe("PropsPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Props · Reference Sheet" })).toBeTruthy();
     expect(screen.getByText(/one multi-view reference sheet.*H3 receives/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Prepare Reference Sheet" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Generate Prop" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Prepare Reference Sheet" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Prop" }));
     expect(await screen.findByText("Name is required")).toBeTruthy();
     expect(screen.getByText("Prop photo is required")).toBeTruthy();
     expect(generateProp).not.toHaveBeenCalled();
@@ -58,5 +64,24 @@ describe("PropsPage", () => {
     expect((screen.getByLabelText(/Name/) as HTMLInputElement).value).toBe("");
     expect(screen.queryByText("propjob_old")).toBeNull();
     expect(screen.getByText("Idle")).toBeTruthy();
+  });
+
+  it("uses costume copy instead of prop labels", async () => {
+    render(<PropsPage kind="costume" onOpenLibrary={() => undefined} />);
+
+    expect(await screen.findByRole("heading", { name: "Costumes · Wardrobe Sheet" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Costume" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Generate Costume" })).toBeTruthy();
+    expect(screen.getByText(/bind it as a Costume Picture/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Generate Prop" })).toBeNull();
+    expect(screen.queryByText(/Generate Prop/i)).toBeNull();
+    expect(screen.queryByText(/Prop photo/i)).toBeNull();
+    expect(screen.queryByText(/the same prop/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate Costume" }));
+    expect(await screen.findByText("Name is required")).toBeTruthy();
+    expect(screen.getByText("Costume photo is required")).toBeTruthy();
+    expect(generateCostume).not.toHaveBeenCalled();
+    expect(generateProp).not.toHaveBeenCalled();
   });
 });

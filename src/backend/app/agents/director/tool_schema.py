@@ -11,6 +11,7 @@ from .intent import (
     actor_design_intent,
     assemble_sequence_intent,
     explicit_gpt_image_intent,
+    explicit_h3_generation_intent,
     explicit_layout_generation_intent,
     material_review_target_shot_id,
     prop_design_intent,
@@ -587,6 +588,13 @@ DIRECTOR_TOOL_SCHEMAS: list[dict[str, Any]] = [
         {"shot_id": {"type": "string", "description": "Optional exact Shot ID to read; omit for project status."}},
     ),
     function_tool(
+        "queue_h3",
+        "Queue local H3 Ref2AV video for one Shot or every submittable Shot. "
+        "Requires Picture refs and a complete six-section prompt. Returns a job_ id. "
+        "Use when the user asks to generate, queue, or render H3 clips.",
+        dict(SHOT_SELECTOR),
+    ),
+    function_tool(
         "review_sequence",
         (
             "Read the current storyboard as a cut: planned runtime, which Shots have "
@@ -621,6 +629,12 @@ def director_tool_schemas(
         return [ACTOR_DESIGN_TOOL]
     if prop_design_intent(current_message):
         return [PROP_DESIGN_TOOL]
+    if explicit_h3_generation_intent(current_message):
+        return [
+            tool
+            for tool in DIRECTOR_TOOL_SCHEMAS
+            if tool["function"]["name"] in {"queue_h3", "get_status"}
+        ]
     layout_generation_authorized = explicit_layout_generation_intent(
         current_message
     )
@@ -675,6 +689,7 @@ def director_tool_schemas(
             "accept_ref_frame",
             "revise_ref_frame",
             "write_prompt",
+            "queue_h3",
             "get_status",
             "inspect_asset",
             "remember_note",

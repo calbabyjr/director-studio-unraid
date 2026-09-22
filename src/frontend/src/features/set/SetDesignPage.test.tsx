@@ -6,10 +6,15 @@ import { SetDesignPage } from "./SetDesignPage";
 import { fetchSceneDefaults, generateScene, listSceneJobs } from "./api";
 import type { SceneJobRecord } from "./api";
 
+const projectState = vi.hoisted(() => ({
+  projectId: "prj_test" as string | null,
+  project: { id: "prj_test", name: "Test project" } as { id: string; name: string } | null,
+}));
+
 vi.mock("../../shared/project/ProjectContext", () => ({
   useProject: () => ({
-    projectId: "prj_test",
-    project: { id: "prj_test", name: "Test project" },
+    projectId: projectState.projectId,
+    project: projectState.project,
   }),
 }));
 
@@ -45,6 +50,8 @@ describe("SetDesignPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    projectState.projectId = "prj_test";
+    projectState.project = { id: "prj_test", name: "Test project" };
     vi.stubGlobal("URL", {
       ...URL,
       createObjectURL: vi.fn(() => "blob:scene-reference"),
@@ -66,6 +73,71 @@ describe("SetDesignPage", () => {
     expect(screen.getByText(/left_side_view_h270_v0\.png/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Generate 7 Angles" })).toBeTruthy();
     expect(container.querySelectorAll(".output-card")).toHaveLength(7);
+  });
+
+  it("sends a MoGe glb with generate", async () => {
+    vi.mocked(generateScene).mockResolvedValue({
+      ...finishedSceneJob,
+      id: "scenejob_moge",
+      status: "queued",
+      name: "Dungeon",
+    });
+    render(<SetDesignPage onOpenLibrary={() => undefined} />);
+    await screen.findByRole("button", { name: "Generate 7 Angles" });
+
+    fireEvent.change(screen.getByLabelText(/Name/), { target: { value: "Dungeon" } });
+    fireEvent.change(screen.getByLabelText(/Scene image/) as HTMLInputElement, {
+      target: { files: [new File(["plate"], "plate.png", { type: "image/png" })] },
+    });
+    fireEvent.change(screen.getByLabelText("MoGe 3D mesh") as HTMLInputElement, {
+      target: { files: [new File(["glb"], "mesh.glb", { type: "model/gltf-binary" })] },
+    });
+    expect(screen.getByText(/mesh\.glb/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Generate 7 Angles" }));
+
+    await waitFor(() => expect(generateScene).toHaveBeenCalledOnce());
+    const form = vi.mocked(generateScene).mock.calls[0][0];
+    expect((form.get("scene_image") as File).name).toBe("plate.png");
+    expect((form.get("moge_glb") as File).name).toBe("mesh.glb");
+    expect(form.get("moge_from_plate")).toBe("false");
+  });
+
+  it("sends moge_from_plate when estimating geometry from the plate", async () => {
+    vi.mocked(generateScene).mockResolvedValue({
+      ...finishedSceneJob,
+      id: "scenejob_moge_plate",
+      status: "queued",
+      name: "Hall",
+    });
+    const { rerender } = render(<SetDesignPage onOpenLibrary={() => undefined} />);
+    await screen.findByRole("button", { name: "Generate 7 Angles" });
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: /Estimate geometry from this plate/,
+    }) as HTMLInputElement;
+    expect(checkbox.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText(/Name/), { target: { value: "Hall" } });
+    fireEvent.change(screen.getByLabelText(/Scene image/) as HTMLInputElement, {
+      target: { files: [new File(["plate"], "plate.png", { type: "image/png" })] },
+    });
+    expect(checkbox.disabled).toBe(false);
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Generate 7 Angles" }));
+
+    await waitFor(() => expect(generateScene).toHaveBeenCalledOnce());
+    expect(vi.mocked(generateScene).mock.calls[0][0].get("moge_from_plate")).toBe("true");
+
+    projectState.projectId = "prj_other";
+    projectState.project = { id: "prj_other", name: "Other project" };
+    rerender(<SetDesignPage onOpenLibrary={() => undefined} />);
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("checkbox", { name: /Estimate geometry from this plate/ }) as HTMLInputElement)
+          .checked,
+      ).toBe(false);
+    });
   });
 
   it("excludes toggled-off views from the generated angle prompts", async () => {

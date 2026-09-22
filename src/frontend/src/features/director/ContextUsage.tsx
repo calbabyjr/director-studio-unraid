@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ContextUsage } from "./api";
 import "./contextUsage.css";
 
@@ -65,7 +66,7 @@ export function ContextUsagePanel({
       <span aria-hidden="true" className="context-usage-trigger-icon">↗</span>
     </button>
 
-    {open ? <div className="context-dialog-backdrop" onMouseDown={(event) => {
+    {open ? createPortal(<div className="context-dialog-backdrop" onMouseDown={(event) => {
       if (event.target === event.currentTarget) close();
     }}>
       <section role="dialog" aria-modal="true" aria-labelledby="context-dialog-title" className="context-dialog">
@@ -117,6 +118,6 @@ export function ContextUsagePanel({
 
         {children ? <footer className="context-dialog-actions">{children}</footer> : null}
       </section>
-    </div> : null}
+    </div>, document.body) : null}
   </div>;
 }

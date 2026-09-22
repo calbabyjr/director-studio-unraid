@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from pathlib import Path
 from typing import Any
@@ -200,6 +201,32 @@ async def await_pipeline_job(job_id: str) -> JobRecord | None:
     if task is not None:
         await asyncio.shield(task)
     return store.load_job(job_id)
+
+
+async def run_nested_pipeline_job(
+    job: JobRecord,
+    *,
+    images: dict[str, tuple[str, bytes]] | None = None,
+    cancel: asyncio.Event,
+) -> JobRecord:
+    """Run a child pipeline on this task without a second generation reservation."""
+    images = images or {}
+    for kind, (filename, data) in images.items():
+        store.save_input_file(job.id, kind, filename, data, project_id=job.project_id)
+
+    pipeline = get_pipeline(job.pipeline_id)
+    prepare_submission = getattr(pipeline, "prepare_job_submission", None)
+    if callable(prepare_submission):
+        try:
+            prepare_submission(job)
+        except Exception as exc:
+            _fail_job_preparation(job, exc)
+            raise
+    store.save_job(job)
+    adapter = _execution_adapters.resolve(pipeline, job=job)
+    runtime = _runtime_for(adapter)
+    await adapter.run(job, pipeline, images, cancel, runtime)
+    return store.load_job(job.id) or job
 
 
 async def resume_pipeline_job(job: JobRecord) -> JobRecord:
@@ -442,6 +469,25 @@ async def cancel_job(job_id: str) -> JobRecord | None:
     return store.enrich_job_urls(job, labels=labels)
 
 
+def _mark_job_cancelled(job_id: str) -> None:
+    job = store.load_job(job_id)
+    if job is None or job.status in {
+        JobStatus.cancelled,
+        JobStatus.succeeded,
+        JobStatus.failed,
+    }:
+        return
+    job.status = JobStatus.cancelled
+    job.error = "Cancelled by user"
+    store.save_job(job)
+    try:
+        from .shot_sync import on_pipeline_job_terminal
+
+        on_pipeline_job_terminal(job)
+    except Exception:
+        logger.exception("shot_sync failed while cancelling job %s", job_id)
+
+
 async def _run_job(
     job_id: str,
     images: dict[str, tuple[str, bytes]],
@@ -454,6 +500,51 @@ async def _run_job(
     adapter = _execution_adapters.resolve(pipeline, job=job)
     runtime = _runtime_for(adapter)
     try:
+        prepare_run = getattr(pipeline, "prepare_run_inputs", None)
+        if callable(prepare_run):
+            try:
+                result = prepare_run(job, images, cancel)
+                if inspect.isawaitable(result):
+                    await result
+            except asyncio.CancelledError:
+                _mark_job_cancelled(job_id)
+                return
+            except Exception as exc:
+                job = store.load_job(job_id) or job
+                if job is None:
+                    return
+                if cancel.is_set():
+                    _mark_job_cancelled(job_id)
+                    return
+                if job.status not in {
+                    JobStatus.cancelled,
+                    JobStatus.succeeded,
+                    JobStatus.failed,
+                }:
+                    job.status = JobStatus.failed
+                    job.error = str(exc)[:1000]
+                    store.save_job(job)
+                    try:
+                        from .shot_sync import on_pipeline_job_terminal
+
+                        on_pipeline_job_terminal(job)
+                    except Exception:
+                        logger.exception(
+                            "shot_sync failed after prepare_run_inputs %s",
+                            job_id,
+                        )
+                logger.exception(
+                    "prepare_run_inputs failed for %s (%s)",
+                    job_id,
+                    job.pipeline_id,
+                )
+                return
+            job = store.load_job(job_id) or job
+            if job is None:
+                return
+        if cancel.is_set():
+            _mark_job_cancelled(job_id)
+            return
         await adapter.run(job, pipeline, images, cancel, runtime)
     finally:
         if adapter.id in LOCAL_COMFY_ADAPTER_IDS:

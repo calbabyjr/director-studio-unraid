@@ -30,6 +30,11 @@ def test_extracts_production_rules_and_corrections():
     assert not extract_memory_candidates("retry")
     assert not extract_memory_candidates("Do you want option A or B?")
     assert not extract_memory_candidates("Do not queue generation yet")
+    future = extract_memory_candidates(
+        'YES, I told you to continue. Remember that in the future'
+    )
+    assert any("continue" in item.lower() and "yes" in item.lower() for item in future)
+    assert not any(item.lower().startswith("to continue") for item in future)
     assert not extract_memory_candidates(
         "Shot 01 references changed. Saved reference delta: {}. Do not infer unrequested production actions."
     )
@@ -60,7 +65,8 @@ def test_project_and_global_notes_persist_across_loads(tmp_path, monkeypatch):
     assert "dungeon" in block
     assert "all projects" in block
     system = apply_memory_to_system("You are the Director.", project.id)
-    assert "STANDING_NOTES" in system
+    assert "dungeon" in system
+    assert "DIRECTOR_MEMORY" in system or "STANDING_NOTES" in system
     removed = forget_note(project_note.id, project_id=project.id)
     assert removed is not None
     assert all(note.id != project_note.id for note in load_notes(project.id))
