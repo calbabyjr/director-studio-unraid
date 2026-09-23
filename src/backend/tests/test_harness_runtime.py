@@ -879,6 +879,7 @@ def test_bounded_harness_history_keeps_recent_turns():
 @pytest.mark.asyncio
 async def test_chat_retries_fresh_session_after_compaction_failure(
     tmp_projects_dir,
+    tmp_path,
     monkeypatch,
 ):
     from app.agents.director import harness_runtime
@@ -905,6 +906,10 @@ async def test_chat_retries_fresh_session_after_compaction_failure(
         notices.append(event)
 
     monkeypatch.setattr(harness_runtime, "HarnessClient", Client)
+    monkeypatch.setattr(harness_runtime.settings, "data_dir", tmp_path)
+    session_dir = tmp_path / "harness-sessions" / "_no-cwd" / harness_runtime.harness_session_id(project.id)
+    session_dir.mkdir(parents=True)
+    (session_dir / "session.jsonl").write_text("{}\n")
     history = (
         [{"role": "user", "content": f"old-{i} " + ("detail " * 40)} for i in range(30)]
         + [{"role": "assistant", "content": "recent-ack"}]
@@ -922,7 +927,10 @@ async def test_chat_retries_fresh_session_after_compaction_failure(
     assert result.reply == "continuing"
     assert len(calls) == 2
     assert calls[0]["history"] == []
-    assert calls[0]["session_id"] != calls[1]["session_id"]
+    # The unsummarizable session is archived and the stable id restarts fresh.
+    assert calls[0]["session_id"] == calls[1]["session_id"]
+    assert not session_dir.exists()
+    assert list((tmp_path / "harness-sessions-archive").iterdir())
     assert calls[1]["history"]
     assert any("recent-ack" in row["content"] for row in calls[1]["history"])
     assert any("recent turns" in str(event.get("text") or "") for event in notices)
@@ -931,6 +939,7 @@ async def test_chat_retries_fresh_session_after_compaction_failure(
 @pytest.mark.asyncio
 async def test_chat_falls_back_to_empty_history_when_retry_still_cannot_compact(
     tmp_projects_dir,
+    tmp_path,
     monkeypatch,
 ):
     from app.agents.director import harness_runtime
@@ -953,6 +962,7 @@ async def test_chat_falls_back_to_empty_history_when_retry_still_cannot_compact(
             return {"reply": "fresh", "thinking": ""}
 
     monkeypatch.setattr(harness_runtime, "HarnessClient", Client)
+    monkeypatch.setattr(harness_runtime.settings, "data_dir", tmp_path)
     result = await harness_runtime.handle_harness_chat(
         project_id=project.id,
         message="Continue",
@@ -964,7 +974,65 @@ async def test_chat_falls_back_to_empty_history_when_retry_still_cannot_compact(
     assert result.reply == "fresh"
     assert len(calls) == 3
     assert calls[2]["history"] == []
-    assert calls[2]["session_id"] != calls[0]["session_id"]
+    assert calls[2]["session_id"] == calls[0]["session_id"]
+
+
+@pytest.mark.asyncio
+async def test_gpu_busy_compaction_keeps_the_saved_session(
+    tmp_projects_dir,
+    tmp_path,
+    monkeypatch,
+):
+    from app.agents.director import harness_runtime
+    from app.agents.director.harness_client import HarnessError
+
+    project = create_project("compaction gpu busy", "")
+    calls = []
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def run(self, body, dispatch, on_progress):
+            calls.append(body)
+            if len(calls) == 1:
+                raise HarnessError(
+                    "Harness COMPACTION_FAILED: History compaction failed: GPU busy: comfy. Original history is preserved.",
+                    code="COMPACTION_FAILED",
+                )
+            return {"reply": "ok", "thinking": ""}
+
+    monkeypatch.setattr(harness_runtime, "HarnessClient", Client)
+    monkeypatch.setattr(harness_runtime.settings, "data_dir", tmp_path)
+    session_dir = tmp_path / "harness-sessions" / "_no-cwd" / harness_runtime.harness_session_id(project.id)
+    session_dir.mkdir(parents=True)
+    result = await harness_runtime.handle_harness_chat(
+        project_id=project.id,
+        message="Continue",
+        svc=None,
+        chat_fn=None,
+        history=[{"role": "user", "content": "prior"}],
+        context_capacity=32_000,
+    )
+    assert result.reply == "ok"
+    assert session_dir.exists()
+    assert calls[1]["session_id"] != calls[0]["session_id"]
+
+
+def test_seed_history_labels_prose_only_actions_and_drops_patrol_posts():
+    from app.agents.director.harness_runtime import bounded_harness_history
+
+    rows = [
+        {"role": "user", "content": "Discuss a Layout for Shot 1"},
+        {"role": "assistant", "content": "Got it. I’ll queue the Layout for sht_1 now:"},
+        {"role": "assistant", "content": "Memory check — I still have 3 open tasks:"},
+        {"role": "assistant", "content": "Which lighting do you want?"},
+    ]
+    kept = bounded_harness_history(rows, budget_tokens=20_000)
+    contents = [row["content"] for row in kept]
+    assert len(kept) == 3
+    assert contents[1].startswith("[Prose only")
+    assert contents[2] == "Which lighting do you want?"
 
 
 @pytest.mark.asyncio
@@ -1201,3 +1269,20 @@ async def test_nonstream_chat_reserves_project_and_cancels(tmp_projects_dir, mon
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize(
+    ("message", "transient"),
+    [
+        ("Harness COMPACTION_FAILED: History compaction failed: GPU busy: comfy. Original history is preserved.", True),
+        ("Harness COMPACTION_FAILED: History compaction failed: Request timed out. Original history is preserved.", True),
+        ("Harness COMPACTION_FAILED: History compaction failed: summarization truncated at the token cap (incomplete checkpoint). Original history is preserved.", False),
+        ("Harness COMPACTION_FAILED: summary is not smaller than the shadowed content (1013 estimated framed tokens >= 1013)", False),
+    ],
+)
+def test_only_session_size_compaction_failures_retire_the_session(message, transient):
+    from app.agents.director import harness_runtime
+    from app.agents.director.harness_client import HarnessError
+
+    error = HarnessError(message, code="COMPACTION_FAILED")
+    assert harness_runtime._compaction_failure_transient(error) is transient

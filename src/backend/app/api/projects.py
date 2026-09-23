@@ -1830,6 +1830,26 @@ async def replace_shot_materials_endpoint(
         ) from exc
 
 
+@router.post("/shots/{shot_id}/refresh-prompt", response_model=Shot)
+async def refresh_shot_prompt_endpoint(
+    shot_id: str,
+    svc: DirectorService = Depends(get_director_service),
+) -> Shot:
+    """Run the Picture review + brief/prompt decision now, without the agent."""
+    from ..core.projects.material_review_worker import refresh_shot_review
+
+    shot = _find_shot(shot_id)
+    if director_chat_sessions.is_active(shot.project_id):
+        raise HTTPException(409, "Director chat is running for this project; try again when it finishes")
+    try:
+        return await refresh_shot_review(shot.id, shot.project_id, svc)
+    except ValueError as e:
+        raise _http_value_error(e) from e
+    except Exception as e:
+        logger.exception("prompt refresh failed for %s", shot_id)
+        raise HTTPException(503, f"Prompt refresh failed: {e}") from e
+
+
 @router.post("/shots/{shot_id}/approve", response_model=Shot)
 async def approve_shot_endpoint(shot_id: str) -> Shot:
     """Gate 2: approve full shot for H3 submit (LLM not required)."""

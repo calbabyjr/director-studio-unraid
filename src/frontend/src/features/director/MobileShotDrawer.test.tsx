@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Shot } from "../../shared/api/types";
 import { MobileShotDrawer } from "./MobileShotDrawer";
+
+const refreshShotPromptMock = vi.hoisted(() => vi.fn());
+
+vi.mock("./api", () => ({
+  refreshShotPrompt: refreshShotPromptMock,
+}));
 
 const shots: Shot[] = ["Arrival", "Reveal"].map((title, index) => ({
   id: `s${index + 1}`, project_id: "prj", scene_id: "sc", title,
@@ -88,5 +94,23 @@ describe("MobileShotDrawer", () => {
 
     expect(screen.queryByText("failed framing")).toBeNull();
     expect(screen.getByText("No Layouts generated for this Shot.")).toBeTruthy();
+  });
+
+  it("refreshes a stale prompt from the drawer and hands back the updated Shot", async () => {
+    const stale: Shot = { ...shots[0], meta: { material_review_pending: true } };
+    const refreshed: Shot = { ...stale, meta: { material_review_pending: false } };
+    refreshShotPromptMock.mockResolvedValue(refreshed);
+    const onShotUpdated = vi.fn();
+
+    render(<MobileShotDrawer shots={[stale, shots[1]]} onShotUpdated={onShotUpdated} onOpenImage={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Shots, 2 planned" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh prompt" }));
+
+    expect(screen.getByRole("button", { name: "Reviewing pictures…" })).toBeTruthy();
+    await waitFor(() => expect(onShotUpdated).toHaveBeenCalledWith(refreshed));
+    expect(refreshShotPromptMock).toHaveBeenCalledWith("s1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Shot 2 · Reveal" }));
+    expect(screen.queryByRole("button", { name: "Refresh prompt" })).toBeNull();
   });
 });

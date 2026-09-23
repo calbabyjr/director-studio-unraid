@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import logging
 import re
+import shutil
 import time
 from typing import Any
 
@@ -33,6 +35,34 @@ from .skill_loader import with_director_skill
 # conservative allowance, not a claim about the model's exact image tokenizer.
 IMAGE_TOKEN_RESERVE = 2048
 
+logger = logging.getLogger("director_studio.director.harness")
+
+# Seeded history is plain text: tool calls and results are gone. A small model
+# that sees its own "I'll queue the Layout now…" replies imitates them in prose
+# and never emits the tool call, so such replies are labelled as unconfirmed.
+_ANNOUNCED_ACTION = re.compile(
+    r"(?:i['’]ll|i will|let me|i['’]m going to|going to)\s+(?:now\s+)?"
+    r"(?:queue|inspect|write|create|run|append|revise|generate|review|add|update|bind|cast)\b"
+    r"|\b(?:queueing|inspecting|writing|creating|generating|reviewing)\b[^\n]{0,80}(?:\bnow\b|\.\.\.|…)",
+    re.I,
+)
+_UNCONFIRMED_PREFIX = (
+    "[Prose only: no tool ran for this earlier reply. Anything it announced "
+    "happened only if PROJECT_STATE shows it; call the tool instead of repeating it.]\n"
+)
+PATROL_PREFIX = "Memory check —"
+
+
+def _seed_row(row: dict) -> dict | None:
+    content = row["content"]
+    if row["role"] != "assistant":
+        return row
+    if content.startswith(PATROL_PREFIX):
+        return None  # regenerable task reminders; they crowd out real turns
+    if _ANNOUNCED_ACTION.search(content) or _claims_pending_tool(content):
+        return {"role": "assistant", "content": _UNCONFIRMED_PREFIX + content}
+    return row
+
 
 def harness_input_budget(context_capacity: int, image_count: int = 0) -> int:
     budget = context_capacity - settings.director_num_predict - image_count * IMAGE_TOKEN_RESERVE
@@ -49,11 +79,12 @@ def bounded_harness_history(rows: list | None, budget_tokens: int) -> list[dict]
     transcript makes compaction abort the turn.
     """
     clean = [
-        {"role": row["role"], "content": row["content"]}
+        seeded
         for row in (rows or [])
         if isinstance(row, dict)
         and row.get("role") in {"user", "assistant"}
         and isinstance(row.get("content"), str)
+        and (seeded := _seed_row({"role": row["role"], "content": row["content"]})) is not None
     ]
     if not clean:
         return []
@@ -516,22 +547,38 @@ async def handle_harness_chat(*, project_id, message, svc, chat_fn=None, history
         result = await _run(harness_session_id(project_id), [])
     except HarnessError as exc:
         if exc.code == "COMPACTION_FAILED":
+            # A transient GPU refusal says nothing about the session's size, so
+            # keep it. Anything else means the saved session can no longer be
+            # summarized in this window and will fail every turn: retire it and
+            # restart the stable session from recent turns.
+            transient = _compaction_failure_transient(exc)
+            if not transient:
+                archive_harness_session(project_id, reason=str(exc))
             if on_progress:
                 await on_progress({
                     "type": "runtime",
-                    "text": "History was too large to compact in the model window; continuing from recent turns.",
+                    "text": (
+                        "History could not be summarized while the GPU is busy; continuing from recent turns."
+                        if transient else
+                        "Chat memory outgrew the model window; archived it and started a fresh working session from recent turns."
+                    ),
                 })
+            retry_id = (harness_session_id(project_id, nonce=str(time.time_ns()))
+                        if transient else harness_session_id(project_id))
             try:
-                result = await _run(harness_session_id(project_id, nonce=str(time.time_ns())), seed)
+                result = await _run(retry_id, seed)
             except HarnessError as retry_exc:
                 if retry_exc.code != "COMPACTION_FAILED":
                     raise
+                if not transient:
+                    archive_harness_session(project_id, reason=str(retry_exc))
                 if on_progress:
                     await on_progress({
                         "type": "runtime",
                         "text": "Continuing without prior chat turns in this working window.",
                     })
-                result = await _run(harness_session_id(project_id, nonce=str(time.time_ns())), [])
+                result = await _run(retry_id if not transient
+                                    else harness_session_id(project_id, nonce=str(time.time_ns())), [])
         elif exc.code != "MAX_STEPS":
             raise
         else:
@@ -562,6 +609,38 @@ def _needs_fresh_storyboard(project, shots) -> bool:
     planned = load_agent_context(project.id)
     planned_hash = (planned.script_hash if planned else "") or ""
     return not shots or planned_hash != _script_hash(script)
+
+
+# Compaction failures that mean the saved session itself can no longer be
+# summarized in this window. Anything else (GPU busy, Ollama timeout/restart)
+# is transient and must not cost the project its native history.
+_SESSION_TOO_LARGE_MARKERS = (
+    "truncated at the token cap",
+    "summary is not smaller",
+    "Overflow recovery failed",
+    "Legacy context migration failed",
+)
+
+
+def _compaction_failure_transient(exc: HarnessError) -> bool:
+    text = str(exc)
+    return not any(marker in text for marker in _SESSION_TOO_LARGE_MARKERS)
+
+
+def archive_harness_session(project_id: str, *, reason: str = "") -> bool:
+    """Move the project's stable Harness session aside; the next turn starts fresh.
+
+    Mirrors the sidecar layout (DS_HARNESS_SESSION_ROOT=<data>/harness-sessions,
+    JSONL persistence under _no-cwd/<session id>). Nothing is deleted.
+    """
+    src = settings.data_dir / "harness-sessions" / "_no-cwd" / harness_session_id(project_id)
+    if not src.is_dir():
+        return False
+    dest = settings.data_dir / "harness-sessions-archive" / f"{project_id}-{time.strftime('%Y%m%dT%H%M%S')}-{time.time_ns() % 10**9:09d}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dest))
+    logger.warning("archived Harness session for %s to %s (%s)", project_id, dest, reason[:200])
+    return True
 
 
 def harness_session_id(project_id: str, nonce: str | None = None) -> str:
@@ -595,10 +674,14 @@ async def compact_harness_chat(*, project_id, chat_fn, history=None, on_progress
     except HarnessError as exc:
         if exc.code != "COMPACTION_FAILED":
             raise
+        transient = _compaction_failure_transient(exc)
+        if not transient:
+            archive_harness_session(project_id, reason=str(exc))
         body = {
             **body,
             "history": seed,
-            "session_id": harness_session_id(project_id, nonce=str(time.time_ns())),
+            "session_id": (harness_session_id(project_id, nonce=str(time.time_ns()))
+                           if transient else harness_session_id(project_id)),
         }
         result = await client.run(body, turn.dispatch, on_progress)
     if not isinstance(result.get("compaction"), dict):

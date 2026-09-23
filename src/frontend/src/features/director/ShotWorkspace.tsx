@@ -10,6 +10,7 @@ import { shotWorkflowStatus } from "../../shared/shotWorkflowStatus";
 import { LayoutReferenceList } from "./LayoutReferenceList";
 import { ShotMaterialEditor } from "./ShotMaterialEditor";
 import { materialReviewMessage } from "./materialReview";
+import { REFRESH_PROMPT_BUSY_LABEL, useShotPromptRefresh } from "./useShotPromptRefresh";
 
 const DOCUMENT_SECTIONS = [
   { id: "shot-brief", label: "Brief" },
@@ -97,6 +98,7 @@ export function ShotWorkspace({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(shots[0]?.id ?? null);
   const [materialEditorOpen, setMaterialEditorOpen] = useState(false);
+  const promptRefresh = useShotPromptRefresh(onShotUpdated);
   const selectedIndex = Math.max(0, shots.findIndex((shot) => shot.id === selectedId));
   const selected = shots[selectedIndex] ?? null;
 
@@ -164,8 +166,21 @@ export function ShotWorkspace({
                     <span className={`status-chip status-${shotWorkflowStatus(selected).key}`}>
                       {shotWorkflowStatus(selected).label}
                     </span>
+                    {shotWorkflowStatus(selected).key === "prompt-stale" || promptRefresh.refreshing(selected.id) ? (
+                      <button
+                        type="button"
+                        className="mode-chip"
+                        disabled={busy || promptRefresh.anyRefreshing}
+                        onClick={() => void promptRefresh.refresh(selected.id)}
+                      >
+                        {promptRefresh.refreshing(selected.id) ? REFRESH_PROMPT_BUSY_LABEL : "Refresh prompt"}
+                      </button>
+                    ) : null}
                   </div>
                 </header>
+                {promptRefresh.errorFor(selected.id) ? (
+                  <div className="banner error" role="alert">{promptRefresh.errorFor(selected.id)}</div>
+                ) : null}
 
                 <nav className="shot-document-nav" aria-label="Shot document sections">
                   {DOCUMENT_SECTIONS.map((section) => (

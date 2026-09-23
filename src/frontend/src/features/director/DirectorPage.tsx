@@ -911,6 +911,7 @@ function DirectorAgentWorkspace({
             onSelectShot={setSelectedShotId}
             onSend={(message) => void send(message)}
             sendDisabled={chatDisabled}
+            onShotUpdated={updateShot}
             onOpenImage={setLightbox}
           />
         ) : null}

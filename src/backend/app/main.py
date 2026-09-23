@@ -24,6 +24,7 @@ logger = logging.getLogger("director_studio")
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     patrol_task: asyncio.Task | None = None
+    review_task: asyncio.Task | None = None
     try:
         recovered = await recover_interrupted_jobs()
         if recovered:
@@ -36,12 +37,17 @@ async def lifespan(_app: FastAPI):
                 "director memory patrol every %ss",
                 getattr(settings, "director_memory_check_sec", 1800),
             )
+        from .core.projects.material_review_worker import material_review_loop
+
+        review_task = asyncio.create_task(material_review_loop())
         yield
     finally:
-        if patrol_task is not None:
-            patrol_task.cancel()
+        for task in (patrol_task, review_task):
+            if task is None:
+                continue
+            task.cancel()
             try:
-                await patrol_task
+                await task
             except asyncio.CancelledError:
                 pass
         await close_execution_runtimes()

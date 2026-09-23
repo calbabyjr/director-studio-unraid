@@ -692,6 +692,14 @@ export async function rejectLayout(shotId: string, feedback: string): Promise<Sh
   return res.json();
 }
 
+// Runs the Picture review + prompt decision now instead of waiting for the idle
+// worker. Slow (~3 minutes); 409 while Director chat is running for the project.
+export async function refreshShotPrompt(shotId: string): Promise<Shot> {
+  const res = await fetch(`/api/shots/${shotId}/refresh-prompt`, { method: "POST" });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export async function getShot(shotId: string): Promise<Shot> {
   const res = await fetch(`/api/shots/${shotId}`);
   if (!res.ok) throw new Error(await parseError(res));

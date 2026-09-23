@@ -8,6 +8,7 @@ import {
 } from "../../shared/api/types";
 import { isDisplayableLayout, isRetiredLayout } from "../../shared/layoutReferenceStatus";
 import { firstActionableShotId, shotWorkflowStatus } from "../../shared/shotWorkflowStatus";
+import { REFRESH_PROMPT_BUSY_LABEL, useShotPromptRefresh } from "./useShotPromptRefresh";
 
 function referenceLabel(role: string) {
   return role.replaceAll("_", " ");
@@ -50,6 +51,7 @@ export function MobileShotDrawer({
   onSelectShot,
   onSend,
   sendDisabled,
+  onShotUpdated,
   onOpenImage,
 }: {
   shots: Shot[];
@@ -57,6 +59,7 @@ export function MobileShotDrawer({
   onSelectShot?: (shotId: string) => void;
   onSend?: (message: string) => void;
   sendDisabled?: boolean;
+  onShotUpdated?: (shot: Shot) => void;
   onOpenImage: (url: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -70,6 +73,7 @@ export function MobileShotDrawer({
   const selected = shots[selectedIndex] ?? null;
   const displayableLayouts = selected?.layout_refs.filter(isDisplayableLayout) ?? [];
   const stage = selected ? shotWorkflowStatus(selected) : null;
+  const promptRefresh = useShotPromptRefresh(onShotUpdated);
 
   useEffect(() => {
     if (selectedIdProp) return;
@@ -133,6 +137,21 @@ export function MobileShotDrawer({
                     <div><dt>Duration</dt><dd>{selected.duration_s}s</dd></div>
                     <div><dt>Status</dt><dd>{stage?.label}</dd></div>
                   </dl>
+                  {stage?.key === "prompt-stale" || promptRefresh.refreshing(selected.id) ? (
+                    <div className="mobile-shot-actions">
+                      <button
+                        type="button"
+                        className="btn primary sm"
+                        disabled={sendDisabled || promptRefresh.anyRefreshing}
+                        onClick={() => void promptRefresh.refresh(selected.id)}
+                      >
+                        {promptRefresh.refreshing(selected.id) ? REFRESH_PROMPT_BUSY_LABEL : "Refresh prompt"}
+                      </button>
+                    </div>
+                  ) : null}
+                  {promptRefresh.errorFor(selected.id) ? (
+                    <div className="banner error" role="alert">{promptRefresh.errorFor(selected.id)}</div>
+                  ) : null}
                   {selected.status === "failed" || selected.blocked_reasons.length ? (
                     <div className="banner error" role="status">
                       {selected.blocked_reasons[0] || "H3 failed for this shot."}

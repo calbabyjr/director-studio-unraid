@@ -7,6 +7,7 @@ import { listLibraryAssets } from "../library/api";
 import { ShotWorkspace } from "./ShotWorkspace";
 
 const replaceShotMaterialsMock = vi.hoisted(() => vi.fn());
+const refreshShotPromptMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../library/api", () => ({
   listLibraryAssets: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock("../library/api", () => ({
 vi.mock("./api", () => ({
   replaceShotMaterials: replaceShotMaterialsMock,
   castActorOnShot: vi.fn(),
+  refreshShotPrompt: refreshShotPromptMock,
 }));
 
 function shot(id: string, title: string): Shot {
@@ -331,5 +333,66 @@ describe("ShotWorkspace", () => {
       expect(listLibraryAssets).toHaveBeenCalledWith("actors", "prj_1");
       expect(listLibraryAssets).toHaveBeenCalledWith("layouts", "prj_1");
     });
+  });
+
+  it("offers a prompt refresh only while the prompt is stale", async () => {
+    const stale = { ...shot("s1", "Arrival"), meta: { material_review_pending: true } };
+    const refreshed = { ...stale, meta: { material_review_pending: false } };
+    let resolveRefresh: (value: Shot) => void = () => {};
+    refreshShotPromptMock.mockReturnValue(new Promise<Shot>((resolve) => { resolveRefresh = resolve; }));
+    const onShotUpdated = vi.fn();
+
+    const { rerender } = render(
+      <ShotWorkspace
+        shots={[stale]}
+        busy={false}
+        onSend={vi.fn()}
+        onShotUpdated={onShotUpdated}
+        onOpenImage={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh prompt" }));
+    const pending = screen.getByRole("button", { name: "Reviewing pictures…" }) as HTMLButtonElement;
+    expect(pending.disabled).toBe(true);
+    expect(refreshShotPromptMock).toHaveBeenCalledWith("s1");
+
+    resolveRefresh(refreshed);
+    await waitFor(() => expect(onShotUpdated).toHaveBeenCalledWith(refreshed));
+
+    rerender(
+      <ShotWorkspace
+        shots={[refreshed]}
+        busy={false}
+        onSend={vi.fn()}
+        onShotUpdated={onShotUpdated}
+        onOpenImage={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Refresh prompt" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reviewing pictures…" })).toBeNull();
+  });
+
+  it("shows why a prompt refresh was refused", async () => {
+    const stale = { ...shot("s1", "Arrival"), meta: { material_review_pending: true } };
+    refreshShotPromptMock.mockRejectedValue(
+      new Error("Director chat is running for this project; try again when it finishes"),
+    );
+    const onShotUpdated = vi.fn();
+
+    render(
+      <ShotWorkspace
+        shots={[stale]}
+        busy={false}
+        onSend={vi.fn()}
+        onShotUpdated={onShotUpdated}
+        onOpenImage={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh prompt" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Director chat is running");
+    expect(onShotUpdated).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "Refresh prompt" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
