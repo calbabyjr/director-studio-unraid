@@ -1328,3 +1328,63 @@ def test_explicit_layout_request_nudges_a_prose_only_reply_once():
     assert _authorized_generation_tool(msg, offered, already) is None
     assert _authorized_generation_tool(msg, [], []) is None
     assert _authorized_generation_tool("What does the layout look like?", offered, []) is None
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ('again.  Remember to give me "radio" buttons.  Generate the Layout now', "queue_ref_frame"),
+        ("Okay, generate the layout for shot 1", "queue_ref_frame"),
+        ("Don’t generate the layout", None),
+        ("I don't want to generate the layout yet", None),
+        ("Let's not generate the layout, just talk", None),
+        ("Please don't make the layout", None),
+        ("Should we generate the layout?", None),
+        ("Make sure the layout brief mentions the rain", None),
+    ],
+)
+def test_generation_nudge_needs_an_unhedged_command(message, expected):
+    from app.agents.director.harness_runtime import _authorized_generation_tool
+
+    offered = [{"type": "function", "function": {"name": "queue_ref_frame"}},
+               {"type": "function", "function": {"name": "queue_h3"}}]
+    assert _authorized_generation_tool(message, offered, []) == expected
+
+
+def test_before_queue_h3_is_not_a_command():
+    from app.agents.director.harness_runtime import _authorized_generation_tool
+
+    offered = [{"type": "function", "function": {"name": "queue_h3"}}]
+    assert _authorized_generation_tool("Before we queue the H3 video, check the prompt", offered, []) is None
+
+
+def test_tool_checks_only_look_at_the_current_turn():
+    from app.agents.director import harness_runtime
+
+    earlier = [
+        {"role": "user", "content": "old request"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c0", "type": "function", "function": {"name": "queue_ref_frame", "arguments": {}}}]},
+        {"role": "tool", "content": 'Error: unknown tool "queue_ref_frame"'},
+        {"role": "assistant", "content": "done"},
+    ]
+    now = earlier + [{"role": "user", "content": "Generate the Layout now"}]
+    offered = [{"type": "function", "function": {"name": "queue_ref_frame"}}]
+    assert harness_runtime._unavailable_tool_calls(now) == []
+    assert harness_runtime._authorized_generation_tool("Generate the Layout now", offered, now) == "queue_ref_frame"
+
+
+def test_seed_keeps_replies_that_ask_the_user():
+    from app.agents.director.harness_runtime import bounded_harness_history
+
+    rows = [
+        {"role": "assistant", "content": "Option A or B? Reply with your choice and I'll queue the reference frame."},
+        {"role": "user", "content": "go with A"},
+    ]
+    assert [r["content"][:6] for r in bounded_harness_history(rows, 20_000)] == ["Option", "go wit"]
+
+
+def test_curly_apostrophe_negation_blocks_layout_tool():
+    from app.agents.director.intent import explicit_layout_generation_intent
+
+    assert explicit_layout_generation_intent("Don’t generate the layout") is False

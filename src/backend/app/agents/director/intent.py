@@ -9,7 +9,9 @@ from ...core.projects.models import Shot
 
 
 def normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").strip().lower())
+    # Phones and macOS type curly apostrophes ("don’t"); match them as straight.
+    text = (text or "").replace("\u2019", "'").replace("\u2018", "'")
+    return re.sub(r"\s+", " ", text.strip().lower())
 
 
 def material_review_target_shot_id(message: str) -> str | None:

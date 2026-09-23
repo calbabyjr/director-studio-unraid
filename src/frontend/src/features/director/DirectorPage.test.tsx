@@ -1370,6 +1370,24 @@ describe("Director chat queue", () => {
     ]);
   });
 
+  it("restores a saved queue paused instead of sending it on load", async () => {
+    localStorage.setItem(
+      "ds.directorChatQueue.prj_test",
+      JSON.stringify([{ id: "queued-old", text: "Generate the Layout", images: [] }]),
+    );
+    vi.mocked(chatWithDirectorStream).mockResolvedValue(reply("Queued layout"));
+    render(<DirectorPage />);
+    await screen.findByRole("heading", { name: "1. Corridor walk-in" });
+
+    expect(await screen.findByText("Queued (1)")).toBeTruthy();
+    expect(screen.getByText(/paused/)).toBeTruthy();
+    expect(sentMessages()).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await screen.findByText("Queued layout");
+    expect(sentMessages()).toEqual(["Generate the Layout"]);
+  });
+
   it("removes a queued message before it is sent", async () => {
     const first = deferred<Awaited<ReturnType<typeof chatWithDirectorStream>>>();
     vi.mocked(chatWithDirectorStream).mockReturnValueOnce(first.promise);

@@ -32,6 +32,11 @@ function loadStoredQueue(projectId: string): QueuedChatMessage[] {
   }
 }
 
+// A queue saved in an earlier visit (or another tab) must not send itself on load.
+export function hasStoredQueue(projectId: string | null): boolean {
+  return Boolean(projectId) && loadStoredQueue(projectId as string).length > 0;
+}
+
 function storeQueue(projectId: string, items: QueuedChatMessage[]) {
   try {
     const textOnly = items

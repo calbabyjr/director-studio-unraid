@@ -47,6 +47,12 @@ _ANNOUNCED_ACTION = re.compile(
     r"|\b(?:queueing|inspecting|writing|creating|generating|reviewing)\b[^\n]{0,80}(?:\bnow\b|\.\.\.|…)",
     re.I,
 )
+# A reply that asks the user something stays: their next answer ("go with A",
+# "yes") is meaningless without it.
+_ASKS_USER = re.compile(
+    r"\?|\b(?:which (?:do|would)|do you want|would you like|shall i|should i|reply with|choose|prefer)\b",
+    re.I,
+)
 # Written by an earlier version of this seed filter; models echoed it verbatim.
 _UNCONFIRMED_PREFIX = "[Prose only"
 PATROL_PREFIX = "Memory check —"
@@ -60,7 +66,7 @@ def _seed_row(row: dict) -> dict | None:
         return row
     if content.startswith((PATROL_PREFIX, _UNCONFIRMED_PREFIX)):
         return None  # regenerable reminders / echoed labels crowd out real turns
-    if _ANNOUNCED_ACTION.search(content) or _claims_pending_tool(content):
+    if (_ANNOUNCED_ACTION.search(content) or _claims_pending_tool(content)) and not _ASKS_USER.search(content):
         return None
     return row
 
@@ -133,9 +139,18 @@ _TOOL_AUTHORIZATION_HINTS = {
 }
 
 
+def _current_turn(messages: list[dict]) -> list[dict]:
+    """Messages from the user's current request on (the saved session holds all turns)."""
+    for index in range(len(messages) - 1, -1, -1):
+        item = messages[index]
+        if item.get("role") == "user" and not str(item.get("content") or "").startswith("[Backend]"):
+            return messages[index:]
+    return messages
+
+
 def _unavailable_tool_calls(messages: list[dict]) -> list[str]:
     names: list[str] = []
-    for message in messages:
+    for message in _current_turn(messages):
         if message.get("role") != "tool":
             continue
         for name in _UNKNOWN_TOOL.findall(str(message.get("content") or "")):
@@ -155,14 +170,36 @@ def _unavailable_tool_guidance(names: list[str]) -> str:
     )
 
 
+_COMMAND_START = re.compile(
+    r"(?:^|[.!;\n]\s*)(?:(?:ok(?:ay)?|yes|now|please|go ahead and|so)[,\s]+)*"
+    r"(?:generate|regenerate|queue|make|render|create|run)\b",
+    re.I,
+)
+_COMMAND_HEDGE = re.compile(
+    r"\?|\b(?:not|never|don't|dont|doesn't|won't|before|after|until|make sure|should|"
+    r"would|could|whether|if|maybe|later)\b",
+    re.I,
+)
+
+
+def _explicit_generation_command(message: str) -> bool:
+    """Stricter than tool gating: only an unhedged imperative earns a forced retry."""
+    from .intent import normalize_text
+
+    text = normalize_text(message)
+    return bool(_COMMAND_START.search(text)) and not _COMMAND_HEDGE.search(text)
+
+
 def _authorized_generation_tool(message: str, offered_tools: list[dict], messages: list[dict]) -> str | None:
     """Generation tool the user explicitly asked for this turn that has not run yet."""
     from .intent import explicit_h3_generation_intent, explicit_layout_generation_intent
 
+    if not _explicit_generation_command(message):
+        return None
     offered = {str(t.get("function", {}).get("name") or "") for t in offered_tools or []}
     called = {
         str(call.get("function", {}).get("name") or "")
-        for item in messages
+        for item in _current_turn(messages)
         for call in (item.get("tool_calls") or [])
     }
     for name, wanted in (

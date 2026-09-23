@@ -36,7 +36,7 @@ import {
   generationStatusText,
   type DirectorVramStatus,
 } from "./generationStatus";
-import { useDirectorChatQueue, type QueuedChatMessage } from "./useDirectorChatQueue";
+import { useDirectorChatQueue, type QueuedChatMessage, hasStoredQueue } from "./useDirectorChatQueue";
 
 const MAX_CHAT_IMAGES = 4;
 const MAX_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -404,7 +404,7 @@ function DirectorAgentWorkspace({
   useEffect(() => {
     seenLayouts.current = new Set();
     setLoadedProjectId(null);
-    setQueuePaused(false);
+    setQueuePaused(hasStoredQueue(projectId));
     setContextUsage([]);
     setChatSession(IDLE_CHAT_SESSION);
     if (!projectId) {
