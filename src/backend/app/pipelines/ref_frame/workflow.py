@@ -15,6 +15,7 @@ from typing import Any
 from ...config import settings
 from ...core.json_cache import load_json_file
 from ...core.schemas import ComfyImageRef
+from ..base import stack_qwen_edit_extra_lora
 
 WORKFLOW_FILENAME = "ref_frame_layout.api.json"
 
@@ -37,6 +38,7 @@ NODE_NEGATIVE = "14"
 NODE_SCENE_ENCODE = "15"  # VAEEncode of scene (image1) → lock environment
 NODE_SCENE_SCALE = "16"  # ImageScale scene plate → target res before encode
 NODE_LIGHTNING_LORA = "17"
+NODE_EXTRA_LORA = "18"
 
 NODE_REF_METHOD = "20"
 NODE_ZERO_NEGATIVE = "21"
@@ -211,6 +213,10 @@ def fill_layout_graph(graph: dict[str, Any], job_params: dict[str, Any]) -> dict
         "_meta": {"title": "Qwen Image Edit 2511 Lightning · 4 steps"},
     }
     sampler_in["model"] = [NODE_LIGHTNING_LORA, 0]
+    stack_qwen_edit_extra_lora(
+        filled, after=NODE_LIGHTNING_LORA, node_id=NODE_EXTRA_LORA,
+        consumers=[(NODE_SAMPLER, "model")],
+    )
 
     if images:
         filled.pop(NODE_NEGATIVE, None)

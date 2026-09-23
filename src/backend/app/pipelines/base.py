@@ -131,3 +131,27 @@ class ExternalPipeline(_PipelineCommon, ABC):
     ) -> ExternalPipelineResult:
         """Execute one externally visible operation and return output bytes."""
         raise NotImplementedError
+
+
+def stack_qwen_edit_extra_lora(prompt: dict, *, after: str, node_id: str, consumers: list[tuple[str, str]]) -> None:
+    """Insert settings.qwen_edit_extra_lora after ``after`` and rewire ``consumers``.
+
+    ``consumers`` are (node id, input name) pairs that currently read ``after``'s model.
+    """
+    from ..config import settings
+
+    name = (settings.qwen_edit_extra_lora or "").strip()
+    if not name or after not in prompt:
+        return
+    prompt[node_id] = {
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+            "model": [after, 0],
+            "lora_name": name,
+            "strength_model": float(settings.qwen_edit_extra_lora_strength),
+        },
+        "_meta": {"title": "Qwen Image Edit 2511 extra LoRA"},
+    }
+    for consumer, field in consumers:
+        if consumer in prompt:
+            prompt[consumer].setdefault("inputs", {})[field] = [node_id, 0]

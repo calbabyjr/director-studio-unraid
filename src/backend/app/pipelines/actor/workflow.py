@@ -14,6 +14,7 @@ import random
 from typing import Any
 
 from ...config import settings
+from ..base import stack_qwen_edit_extra_lora
 from ...core.json_cache import load_json_file
 from ...core.schemas import ComfyImageRef
 
@@ -485,6 +486,8 @@ def build_actor_prompt(
                     f"director-studio/{safe}/{LEAF_PREFIX.get(key, key)}"
                 )
 
+    # Qwen Edit chain: UNET 4 → Lightning 5 → ModelSampling 6 → CFGNorm 7.
+    stack_qwen_edit_extra_lora(prompt, after="5", node_id="90", consumers=[("6", "model")])
     return prompt, resolved_seed
 
 

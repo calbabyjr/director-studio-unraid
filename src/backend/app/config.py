@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     director_num_ctx: int = 32768
     director_num_predict: int = 4096
     vram_policy: str = "exclusive"  # exclusive: one of LLM/Comfy at a time, others queue
+    # Extra Qwen-Image-Edit-2511 LoRA stacked after Lightning in the actor and
+    # Layout graphs (e.g. an NSFW adapter). Empty disables it.
+    qwen_edit_extra_lora: str = ""
+    qwen_edit_extra_lora_strength: float = 0.9
     # Max seconds to wait in GPU queue (Plan waits for H3, next gen waits for casting, …)
     vram_acquire_timeout_sec: float = 3600.0
     # Multi-turn residency: keep a local LLM loaded between chat/plan turns.
