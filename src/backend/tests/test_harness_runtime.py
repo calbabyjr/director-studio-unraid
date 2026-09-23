@@ -1030,9 +1030,20 @@ def test_seed_history_labels_prose_only_actions_and_drops_patrol_posts():
     ]
     kept = bounded_harness_history(rows, budget_tokens=20_000)
     contents = [row["content"] for row in kept]
-    assert len(kept) == 3
-    assert contents[1].startswith("[Prose only")
-    assert contents[2] == "Which lighting do you want?"
+    assert contents == ["Discuss a Layout for Shot 1", "Which lighting do you want?"]
+
+
+def test_seed_history_drops_echoed_labels_and_keeps_only_recent_rows():
+    from app.agents.director.harness_runtime import SEED_MAX_ROWS, bounded_harness_history
+
+    rows = [{"role": "user", "content": f"turn {i}"} for i in range(40)]
+    rows.append({"role": "assistant", "content": "[Prose only: no tool ran]\nGot it."})
+    kept = bounded_harness_history(rows, budget_tokens=20_000)
+    contents = [row["content"] for row in kept]
+    assert not any(text.startswith("[Prose only") for text in contents)
+    assert contents[-1] == "turn 39"
+    assert len([t for t in contents if t.startswith("turn ")]) <= SEED_MAX_ROWS
+    assert "omitted" in contents[0]
 
 
 @pytest.mark.asyncio

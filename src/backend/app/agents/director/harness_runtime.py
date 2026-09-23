@@ -37,30 +37,31 @@ IMAGE_TOKEN_RESERVE = 2048
 
 logger = logging.getLogger("director_studio.director.harness")
 
-# Seeded history is plain text: tool calls and results are gone. A small model
-# that sees its own "I'll queue the Layout now…" replies imitates them in prose
-# and never emits the tool call, so such replies are labelled as unconfirmed.
+# Seeded history is plain text: tool calls and results are gone. A model that
+# sees its own "I'll queue the Layout now…" replies imitates them in prose (and
+# copies any label put on them) instead of emitting the tool call, so such
+# replies are dropped from the seed; PROJECT_STATE carries what actually ran.
 _ANNOUNCED_ACTION = re.compile(
     r"(?:i['’]ll|i will|let me|i['’]m going to|going to)\s+(?:now\s+)?"
     r"(?:queue|inspect|write|create|run|append|revise|generate|review|add|update|bind|cast)\b"
     r"|\b(?:queueing|inspecting|writing|creating|generating|reviewing)\b[^\n]{0,80}(?:\bnow\b|\.\.\.|…)",
     re.I,
 )
-_UNCONFIRMED_PREFIX = (
-    "[Prose only: no tool ran for this earlier reply. Anything it announced "
-    "happened only if PROJECT_STATE shows it; call the tool instead of repeating it.]\n"
-)
+# Written by an earlier version of this seed filter; models echoed it verbatim.
+_UNCONFIRMED_PREFIX = "[Prose only"
 PATROL_PREFIX = "Memory check —"
+# Recent turns only: long prose-only stretches teach the model to loop.
+SEED_MAX_ROWS = 12
 
 
 def _seed_row(row: dict) -> dict | None:
     content = row["content"]
     if row["role"] != "assistant":
         return row
-    if content.startswith(PATROL_PREFIX):
-        return None  # regenerable task reminders; they crowd out real turns
+    if content.startswith((PATROL_PREFIX, _UNCONFIRMED_PREFIX)):
+        return None  # regenerable reminders / echoed labels crowd out real turns
     if _ANNOUNCED_ACTION.search(content) or _claims_pending_tool(content):
-        return {"role": "assistant", "content": _UNCONFIRMED_PREFIX + content}
+        return None
     return row
 
 
@@ -86,6 +87,8 @@ def bounded_harness_history(rows: list | None, budget_tokens: int) -> list[dict]
         and isinstance(row.get("content"), str)
         and (seeded := _seed_row({"role": row["role"], "content": row["content"]})) is not None
     ]
+    omitted_by_count = max(0, len(clean) - SEED_MAX_ROWS)
+    clean = clean[-SEED_MAX_ROWS:]
     if not clean:
         return []
     budget_chars = max(4000, int(budget_tokens * 4 * 0.35))
@@ -98,7 +101,7 @@ def bounded_harness_history(rows: list | None, budget_tokens: int) -> list[dict]
         kept.append(row)
         used += size
     kept.reverse()
-    omitted = len(clean) - len(kept)
+    omitted = len(clean) - len(kept) + omitted_by_count
     if omitted <= 0:
         return kept
     return [
