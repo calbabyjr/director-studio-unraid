@@ -121,6 +121,40 @@ def bounded_harness_history(rows: list | None, budget_tokens: int) -> list[dict]
     ]
 
 
+_UNKNOWN_TOOL = re.compile(r'unknown tool "([A-Za-z0-9_]+)"')
+# Tools withheld unless the user's current message explicitly authorizes them.
+_TOOL_AUTHORIZATION_HINTS = {
+    "queue_ref_frame": 'Layout generation needs an explicit go-ahead in the user\'s message, e.g. "Generate the Layout" or "Queue the Layout now".',
+    "revise_ref_frame": 'Layout revision needs an explicit go-ahead in the user\'s message, e.g. "Regenerate the Layout".',
+    "queue_gpt_ref_frame": 'GPT Layout generation needs an explicit go-ahead in the user\'s message, e.g. "Generate the Layout with GPT".',
+    "queue_h3": 'Video generation needs an explicit go-ahead in the user\'s message, e.g. "Generate the H3 video for Shot 1".',
+    "extract_clip_tail_frame": 'Tail-frame extraction needs an explicit request, e.g. "Use the last frame of Shot 1 as the Layout".',
+    "assemble_sequence": 'Sequence assembly needs an explicit request, e.g. "Assemble the sequence".',
+}
+
+
+def _unavailable_tool_calls(messages: list[dict]) -> list[str]:
+    names: list[str] = []
+    for message in messages:
+        if message.get("role") != "tool":
+            continue
+        for name in _UNKNOWN_TOOL.findall(str(message.get("content") or "")):
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def _unavailable_tool_guidance(names: list[str]) -> str:
+    hints = [_TOOL_AUTHORIZATION_HINTS[n] for n in names if n in _TOOL_AUTHORIZATION_HINTS]
+    return (
+        f"[Backend] {', '.join(names)} is not available in this turn, so nothing was queued. "
+        + (" ".join(hints) + " " if hints else "")
+        + "Do not call any tool again this turn. Reply to the user: summarize exactly what you "
+        "would do (shot, purpose, visual state, source references) and tell them the phrase "
+        "that authorizes it."
+    )
+
+
 class BackendTurn:
     """A bounded, process-local turn, never a second project or session store."""
 
@@ -303,6 +337,14 @@ class BackendTurn:
             offered_tools = [{"type": "function", "function": {
                 "name": t["name"], "description": t.get("description", ""), "parameters": t["parameters"],
             }} for t in schemas]
+        if not compacting:
+            blocked = _unavailable_tool_calls(messages)
+            if blocked:
+                # A model that calls a tool this turn does not offer gets a bare
+                # "unknown tool" error and tends to retry it until MAX_STEPS.
+                # Take tools away and have it answer the user instead.
+                offered_tools = []
+                messages.append({"role": "user", "content": _unavailable_tool_guidance(blocked)})
         if self.images and not compacting:
             # Bytes are never sent to Node. Always hydrate the latest user message locally.
             for message in reversed(messages):

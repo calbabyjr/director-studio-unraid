@@ -1298,3 +1298,20 @@ def test_only_session_size_compaction_failures_retire_the_session(message, trans
 
     error = HarnessError(message, code="COMPACTION_FAILED")
     assert harness_runtime._compaction_failure_transient(error) is transient
+
+
+def test_unknown_gated_tool_removes_tools_and_explains_authorization():
+    from app.agents.director import harness_runtime
+
+    messages = [
+        {"role": "user", "content": "Jenny crawling, Wendy at right"},
+        {"role": "assistant", "content": "", "tool_calls": []},
+        {"role": "tool", "content": 'Error: unknown tool "queue_ref_frame"'},
+        {"role": "tool", "content": 'Error: unknown tool "queue_ref_frame"'},
+    ]
+    blocked = harness_runtime._unavailable_tool_calls(messages)
+    assert blocked == ["queue_ref_frame"]
+    guidance = harness_runtime._unavailable_tool_guidance(blocked)
+    assert "Generate the Layout" in guidance
+    assert "Do not call any tool again" in guidance
+    assert harness_runtime._unavailable_tool_calls(messages[:2]) == []
