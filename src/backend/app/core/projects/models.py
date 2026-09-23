@@ -197,6 +197,7 @@ class Project(BaseModel):
     name: str
     script_text: str
     script_locked: bool = False
+    script_draft_pending: bool = False
     mode: ProjectMode = ProjectMode.director
     soul_id: str = "studio"
     created_at: str

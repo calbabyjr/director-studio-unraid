@@ -119,6 +119,7 @@ class ActorPipeline(Pipeline):
             extra_images=extra_images,
             include_headwear=bool(p.get("include_headwear")),
             include_footwear=bool(p.get("include_footwear")),
+            dress_state=p.get("dress_state"),
             seed=job.seed,
             job_id=job.id,
         )
@@ -146,6 +147,13 @@ class ActorPipeline(Pipeline):
         notes: str | None = None,
         project_id: str | None = None,
     ) -> LibraryAsset:
-        return super().save_to_library(
+        from ...core.library.store import write_asset
+
+        asset = super().save_to_library(
             job, name=name, notes=notes, project_id=project_id
         )
+        meta = dict(asset.meta or {})
+        meta["dress_state"] = workflow.normalize_dress_state(
+            (job.params or {}).get("dress_state")
+        )
+        return write_asset(asset.model_copy(update={"meta": meta}))

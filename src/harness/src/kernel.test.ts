@@ -116,6 +116,20 @@ describe("real Harness kernel", () => {
     expect(purposes).toEqual(["compaction"]);
   });
 
+  it("continues when a non-shrinking summary still fits the input window", async () => {
+    const purposes: string[] = [];
+    const history = Array.from({ length: 162 }, () => ({ role: "user", content: "historical detail ".repeat(50) }));
+    const host: Host = async (method, params) => {
+      if (method === "context") return { system: "fixture", state: {}, tools: [] };
+      purposes.push(String(params.purpose));
+      if (params.purpose === "compaction") return { content: "not compressed ".repeat(10000) };
+      return { content: "ok" };
+    };
+    expect((await runTurn({ ...input, history, context_window: 40000 }, host, new AbortController().signal)).reply).toBe("ok");
+    expect(purposes[0]).toBe("compaction");
+    expect(purposes.at(-1)).toBe("turn");
+  });
+
   it.each(["finish_reason", "done_reason"])("reports truncated %s output as incomplete", async (field) => {
     const host: Host = async (method) => method === "context"
       ? { system: "fixture", state: {}, tools: [] }

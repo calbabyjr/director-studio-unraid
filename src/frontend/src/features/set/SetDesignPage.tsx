@@ -21,6 +21,7 @@ const ACTIVE: JobStatus[] = ["queued", "uploading", "running"];
 
 interface Props {
   onOpenLibrary: () => void;
+  active?: boolean;
 }
 
 function angleLabel(prompt: string): string {
@@ -33,7 +34,7 @@ function angleLabel(prompt: string): string {
   return shortLabel.charAt(0).toUpperCase() + shortLabel.slice(1);
 }
 
-export function SetDesignPage({ onOpenLibrary }: Props) {
+export function SetDesignPage({ onOpenLibrary, active = true }: Props) {
   const { projectId, project } = useProject();
 
   const [defaults, setDefaults] = useState<SceneMetaDefaults | null>(null);
@@ -57,6 +58,7 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
   const [lightbox, setLightbox] = useState<{ slots: OutputSlot[]; index: number } | null>(null);
 
   useEffect(() => {
+    if (!active) return;
     fetchSceneDefaults()
       .then((d) => {
         setDefaults(d);
@@ -65,7 +67,7 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
         setAppend((prev) => prev || d.default_append || "");
       })
       .catch((e) => setFormError(String(e)));
-  }, []);
+  }, [active]);
 
   // Project-scoped drafts must never leak into the next project. On a reload,
   // reconnect only to work that is still in progress.
@@ -88,31 +90,34 @@ export function SetDesignPage({ onOpenLibrary }: Props) {
     setBusy(false);
     setSaved(null);
     setLightbox(null);
-    if (!projectId) return;
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!active || !projectId) return;
     let cancelled = false;
     listSceneJobs(projectId, 15)
       .then((jobs) => {
         if (cancelled) return;
-        const active = jobs.find((j) => ACTIVE.includes(j.status));
-        if (!active) return;
-        setJob(active);
-        if (active.name) setName(active.name);
+        const inFlight = jobs.find((j) => ACTIVE.includes(j.status));
+        if (!inFlight) return;
+        setJob(inFlight);
+        if (inFlight.name) setName(inFlight.name);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [active, projectId]);
 
   useEffect(() => {
-    if (!job || !ACTIVE.includes(job.status)) return;
+    if (!active || !job || !ACTIVE.includes(job.status)) return;
     const t = window.setInterval(() => {
       getSceneJob(job.id)
         .then(setJob)
         .catch((e) => setFormError(String(e)));
     }, 1500);
     return () => window.clearInterval(t);
-  }, [job?.id, job?.status]);
+  }, [active, job?.id, job?.status]);
 
   const status: JobStatus | "idle" = job?.status || "idle";
   const isRunning = job ? ACTIVE.includes(job.status) : false;

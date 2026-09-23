@@ -102,6 +102,19 @@ export async function addLibraryAssetFile(
   return res.json();
 }
 
+export async function deleteLibraryAssetFile(
+  kind: string,
+  assetId: string,
+  fileKey: string,
+): Promise<LibraryAsset> {
+  const res = await fetch(
+    `/api/library/${encodeURIComponent(kind)}/${encodeURIComponent(assetId)}/files/${encodeURIComponent(fileKey)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export async function addActorVoiceSample(
   assetId: string,
   file: File,
@@ -122,7 +135,7 @@ export async function addActorVoiceSample(
 export async function updateLibraryAsset(
   kind: string,
   assetId: string,
-  metadata: { name: string; notes: string },
+  metadata: { name?: string; notes?: string; dress_state?: string },
 ): Promise<LibraryAsset> {
   const res = await fetch(
     `/api/library/${encodeURIComponent(kind)}/${encodeURIComponent(assetId)}`,
@@ -164,14 +177,19 @@ export async function getLibraryAsset(
   return res.json();
 }
 
-export async function updateActorSheet(assetId: string): Promise<{
+export async function updateActorSheet(
+  assetId: string,
+  opts?: { dress_state?: string },
+): Promise<{
   id: string;
   status: string;
   error: string | null;
 }> {
+  const body = new FormData();
+  if (opts?.dress_state) body.set("dress_state", opts.dress_state);
   const res = await fetch(
     `/api/library/actors/${encodeURIComponent(assetId)}/update-sheet`,
-    { method: "POST" },
+    { method: "POST", body },
   );
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();

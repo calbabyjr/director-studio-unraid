@@ -118,6 +118,29 @@ async def test_chat_preflight_reads_local_provider_context_capacity(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_chat_preflight_falls_back_when_local_capacity_is_missing(monkeypatch):
+    from app.api import projects as projects_api
+
+    class EmptyLifecycle:
+        uses_local_gpu = True
+
+        async def context_capacity(self, model: str) -> int | None:
+            return None
+
+    active = RecordingProvider()
+    active.provider_id = "ollama"
+    active.lifecycle = EmptyLifecycle()
+    monkeypatch.setattr(
+        "app.core.vram.get_orchestrator", lambda: FakeOrchestrator()
+    )
+    monkeypatch.setattr(projects_api.settings, "director_num_ctx", 32768)
+
+    chat_fn = await projects_api._make_chat_fn(provider=active)
+
+    assert await chat_fn.resolve_context_capacity() == 32768
+
+
+@pytest.mark.asyncio
 async def test_make_chat_fn_retries_tools_only_for_unsupported_feature(monkeypatch):
     from app.api import projects as projects_api
 

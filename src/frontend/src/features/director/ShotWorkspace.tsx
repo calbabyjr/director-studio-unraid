@@ -145,7 +145,7 @@ export function ShotWorkspace({
                   <span className="shot-bookmark-index">{String(index + 1).padStart(2, "0")}</span>
                   <span className="shot-bookmark-copy">
                     <strong>{shot.title}</strong>
-                    <small title={stage.label}>Shot {index + 1}</small>
+                    <small>{stage.label}</small>
                   </span>
                 </button>
               );

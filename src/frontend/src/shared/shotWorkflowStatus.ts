@@ -37,3 +37,9 @@ export function shotWorkflowStatus(shot: Shot): ShotWorkflowStatus {
   }
   return { key: "needs-prompt", label: "Needs prompt" };
 }
+
+export function firstActionableShotId(shots: Shot[]): string | null {
+  if (!shots.length) return null;
+  const next = shots.find((shot) => shotWorkflowStatus(shot).key !== "h3-succeeded");
+  return (next ?? shots[0]).id;
+}

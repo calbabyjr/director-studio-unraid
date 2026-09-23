@@ -84,6 +84,14 @@ vi.mock("./api", () => ({
     { id: "studio", name: "Studio director", description: "", builtin: true, markdown: "# Studio", lessons: "", updated_at: "2026-01-01" },
   ]),
   updateProject: vi.fn(),
+  getScreenplayInterview: vi.fn().mockResolvedValue({
+    premise: "",
+    turns: [],
+    ready: false,
+    brief: "",
+    updated_at: "",
+  }),
+  postScreenplayInterview: vi.fn(),
 }));
 
 function deferred<T>() {
@@ -222,6 +230,43 @@ describe("Director shot actions", () => {
     expect(getDirectorModel).not.toHaveBeenCalled();
     expect(chatWithDirectorStream).not.toHaveBeenCalled();
     expect(queueRefFrame).not.toHaveBeenCalled();
+  });
+
+  it("shows a jump-to-latest control after scrolling the chat up", async () => {
+    getDirectorChatHistoryMock.mockResolvedValue([
+      { id: "m1", role: "user", content: "hello" },
+      { id: "m2", role: "assistant", content: "A long reply." },
+    ]);
+    render(<DirectorPage />);
+    await screen.findByText("A long reply.");
+    const log = document.querySelector(".chat-log") as HTMLDivElement;
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1200 });
+    Object.defineProperty(log, "clientHeight", { configurable: true, value: 240 });
+    log.scrollTop = 0;
+    fireEvent.scroll(log);
+    const jump = await screen.findByRole("button", { name: "Jump to latest" });
+    fireEvent.click(jump);
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+  });
+
+  it("turns a prose checkbox quiz into tappable answers", async () => {
+    getDirectorChatHistoryMock.mockResolvedValue([
+      {
+        id: "m1",
+        role: "assistant",
+        content:
+          `- For lighting:
+  - [ ] Cool tungsten key
+  - [ ] Warm white wraparound`,
+        choices: [],
+      },
+    ]);
+    render(<DirectorPage />);
+    expect(await screen.findByRole("checkbox", { name: "Cool tungsten key" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Warm white wraparound" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send answers" }));
+    await waitFor(() => expect(chatWithDirectorStream).toHaveBeenCalled());
+    expect(vi.mocked(chatWithDirectorStream).mock.calls[0][1]).toContain("Warm white wraparound");
   });
 
   it("hides shot controls while keeping chat in chat-only mode", async () => {
@@ -445,6 +490,17 @@ describe("Director shot actions", () => {
     expect(screen.queryByRole("button", { name: /Write H3 prompt/ })).toBeNull();
     expect(screen.queryByRole("separator", { name: "Resize Director chat and Shots" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Shot workspace" })).toBeNull();
+  });
+
+  it("opens the mobile shot drawer and two action chips", async () => {
+    render(<DirectorPage mobile />);
+
+    expect(await screen.findByRole("button", { name: "Shots, 1 planned" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Project status" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Write H3 · 01/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Shots, 1 planned" }));
+    expect(screen.getByRole("button", { name: "Write H3 prompt" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Discuss a Layout" })).toBeTruthy();
   });
 
   it("keeps chat project-wide without showing a redundant scope subtitle", async () => {
@@ -683,7 +739,7 @@ describe("Director shot actions", () => {
     const promptAction = screen.getByRole("button", { name: "Write H3 prompt · Shot 02" });
     const shortcutRow = promptAction.closest(".chat-chips");
     expect(shortcutRow).toBeTruthy();
-    expect(shortcutRow?.querySelectorAll("button")).toHaveLength(4);
+    expect(shortcutRow?.querySelectorAll("button")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Review images" })).toBeNull();
     expect(screen.queryByText("Selected Shot")).toBeNull();
 
@@ -953,7 +1009,9 @@ describe("Director shot actions", () => {
     await screen.findByRole("heading", { name: "1. Corridor walk-in" });
 
     expect(screen.getByRole("button", { name: "Project status" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Plan shots" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Plan shots" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Draft screenplay" })).toBeNull();
+    expect(screen.getByRole("button", { name: /Write H3/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Review images" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Review references" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Help" })).toBeNull();
@@ -1196,9 +1254,45 @@ describe("Director shot actions", () => {
     expect(screen.getByText("dialogue revision")).toBeTruthy();
   });
 
+  it("does not poll idle ref_frame_pending shots that have no Layout jobs", async () => {
+    vi.useFakeTimers();
+    vi.mocked(getProject).mockResolvedValue({
+      project: {
+        id: "prj_test", name: "Test project", script_text: "INT. HALLWAY - DAY", mode: "director",
+        created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", shot_ids: [testShot.id],
+      },
+      shots: [{ ...testShot, status: "ref_frame_pending", layout_refs: [] }],
+    });
+    render(<DirectorPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const initialCalls = vi.mocked(getProject).mock.calls.length;
+    await act(async () => { vi.advanceTimersByTime(7500); await Promise.resolve(); await Promise.resolve(); });
+    expect(getProject).toHaveBeenCalledTimes(initialCalls);
+  });
+
   it("shows a polling error without losing the page and clears it after the next refresh", async () => {
     vi.useFakeTimers();
-    const pending = { ...testShot, status: "ref_frame_pending" as const };
+    const pending = {
+      ...testShot,
+      status: "needs_review" as const,
+      layout_refs: [
+        {
+          id: "lr_running",
+          asset_id: null,
+          job_id: "job_running",
+          job_status: "running" as const,
+          job_error: "",
+          purpose: "doorway angle",
+          state_description: "Waiting on the Layout worker.",
+          time_hint: "entry",
+          source_refs: [],
+          review_status: null,
+          review_feedback: "",
+          selected_for_h3: false,
+          created_at: "2026-08-26T10:00:00Z",
+        },
+      ],
+    };
     const detail: ProjectDetail = {
       project: {
         id: "prj_test", name: "Test project", script_text: "INT. HALLWAY - DAY", mode: "director",

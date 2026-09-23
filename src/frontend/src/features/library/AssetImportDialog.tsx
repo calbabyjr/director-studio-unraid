@@ -78,7 +78,7 @@ export function AssetImportDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      onClick={onClose}
+      onClick={() => { if (!busy) onClose(); }}
     >
       <div className="folder-modal-panel asset-import-modal-panel" onClick={(event) => event.stopPropagation()}>
         <div className="folder-modal-head">

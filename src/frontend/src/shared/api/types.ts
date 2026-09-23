@@ -184,6 +184,8 @@ export interface Project {
   id: string;
   name: string;
   script_text: string;
+  script_locked?: boolean;
+  script_draft_pending?: boolean;
   mode: ProjectMode;
   soul_id?: string;
   created_at: string;

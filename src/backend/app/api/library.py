@@ -13,6 +13,7 @@ from ..core.library.store import (
     add_actor_voice_sample,
     add_asset_file,
     assign_asset_project,
+    delete_asset_file,
     create_external_asset,
     create_external_voice_asset,
     delete_asset,
@@ -50,6 +51,7 @@ class BulkAssignBody(BaseModel):
 class UpdateLibraryMetadataBody(BaseModel):
     name: str | None = None
     notes: str | None = None
+    dress_state: str | None = None
 
 
 class RecastKindBody(BaseModel):
@@ -390,13 +392,19 @@ async def upload_actor_voice_sample(
 
 
 @router.post("/library/actors/{asset_id}/update-sheet")
-async def update_actor_sheet(asset_id: str):
+async def update_actor_sheet(
+    asset_id: str,
+    dress_state: str = Form(""),
+):
     from ..pipelines.actor.schemas import ActorJobResponse
     from ..pipelines.registry import get_pipeline
     from ..core.jobs import enrich_job_urls
 
     try:
-        job = await queue_actor_sheet_update(asset_id)
+        job = await queue_actor_sheet_update(
+            asset_id,
+            dress_state=dress_state or None,
+        )
     except ValueError as exc:
         message = str(exc)
         status = 404 if "not found" in message else 400
@@ -473,6 +481,20 @@ async def upload_library_asset_file(
     return updated
 
 
+@router.delete("/library/{kind}/{asset_id}/files/{file_key}", response_model=LibraryAsset)
+def delete_library_asset_file(kind: str, asset_id: str, file_key: str) -> LibraryAsset:
+    if kind not in KINDS:
+        raise HTTPException(400, f"unknown kind: {kind}")
+    try:
+        updated = delete_asset_file(kind, asset_id, file_key)
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message else 400
+        raise HTTPException(status, message) from exc
+    _invalidate_shots_using_asset(updated)
+    return updated
+
+
 @router.patch("/library/{kind}/{asset_id}", response_model=LibraryAsset)
 async def update_library_asset_metadata(
     kind: str,
@@ -495,6 +517,12 @@ async def update_library_asset_metadata(
         meta = dict(asset.meta or {})
         meta["description"] = notes
         updates["notes"] = notes
+        updates["meta"] = meta
+    if body.dress_state is not None:
+        from ..pipelines.actor.workflow import normalize_dress_state
+
+        meta = dict(updates.get("meta") or asset.meta or {})
+        meta["dress_state"] = normalize_dress_state(body.dress_state)
         updates["meta"] = meta
     if not updates:
         return asset

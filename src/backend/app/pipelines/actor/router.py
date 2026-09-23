@@ -22,7 +22,7 @@ from .schemas import (
     ActorRecord,
     SaveActorRequest,
 )
-from .workflow import derive_mode
+from .workflow import DRESS_CLOTHED, derive_mode, normalize_dress_state
 
 router = APIRouter(tags=["actors"])
 
@@ -78,6 +78,7 @@ async def generate_actor(
     profile_image: UploadFile | None = File(None),
     back_image: UploadFile | None = File(None),
     extra_threeview_image: UploadFile | None = File(None),
+    dress_state: str = Form("unclothed"),
 ) -> ActorJobResponse:
     """
     Auto-routed casting job:
@@ -106,6 +107,9 @@ async def generate_actor(
         first_key = next(key for key in ("face", "profile", "back", "threeview_extra") if key in extras)
         actor_img = extras.pop(first_key)
     has_actor = actor_img is not None
+    dress = normalize_dress_state(dress_state)
+    if dress != DRESS_CLOTHED:
+        wardrobe_img = None
     has_wardrobe = wardrobe_img is not None
     include_headwear = has_wardrobe and include_headwear
     include_footwear = has_wardrobe and include_footwear
@@ -140,6 +144,7 @@ async def generate_actor(
             "has_wardrobe_ref": has_wardrobe,
             "include_headwear": include_headwear,
             "include_footwear": include_footwear,
+            "dress_state": dress,
             "extra_ref_keys": list(extras),
             "mode": mode,  # display only
         },

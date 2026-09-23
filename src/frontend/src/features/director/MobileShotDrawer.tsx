@@ -7,7 +7,7 @@ import {
   type ShotRef,
 } from "../../shared/api/types";
 import { isDisplayableLayout, isRetiredLayout } from "../../shared/layoutReferenceStatus";
-import { shotWorkflowStatus } from "../../shared/shotWorkflowStatus";
+import { firstActionableShotId, shotWorkflowStatus } from "../../shared/shotWorkflowStatus";
 
 function referenceLabel(role: string) {
   return role.replaceAll("_", " ");
@@ -46,22 +46,38 @@ function MobileLayoutCard({ layout, onOpen }: { layout: LayoutReference; onOpen:
 
 export function MobileShotDrawer({
   shots,
+  selectedId: selectedIdProp,
+  onSelectShot,
+  onSend,
+  sendDisabled,
   onOpenImage,
 }: {
   shots: Shot[];
+  selectedId?: string | null;
+  onSelectShot?: (shotId: string) => void;
+  onSend?: (message: string) => void;
+  sendDisabled?: boolean;
   onOpenImage: (url: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(shots[0]?.id ?? null);
+  const [internalId, setInternalId] = useState<string | null>(shots[0]?.id ?? null);
+  const selectedId = selectedIdProp ?? internalId;
+  const selectShot = (shotId: string) => {
+    setInternalId(shotId);
+    onSelectShot?.(shotId);
+  };
   const selectedIndex = Math.max(0, shots.findIndex((shot) => shot.id === selectedId));
   const selected = shots[selectedIndex] ?? null;
   const displayableLayouts = selected?.layout_refs.filter(isDisplayableLayout) ?? [];
+  const stage = selected ? shotWorkflowStatus(selected) : null;
 
   useEffect(() => {
-    if ((!selectedId || !shots.some((shot) => shot.id === selectedId)) && shots[0]) {
-      setSelectedId(shots[0].id);
+    if (selectedIdProp) return;
+    if ((!internalId || !shots.some((shot) => shot.id === internalId))) {
+      const next = firstActionableShotId(shots);
+      if (next) setInternalId(next);
     }
-  }, [selectedId, shots]);
+  }, [internalId, selectedIdProp, shots]);
 
   return (
     <section className={`mobile-shot-drawer${expanded ? " expanded" : ""}`}>
@@ -87,12 +103,11 @@ export function MobileShotDrawer({
                   aria-label={`Shot ${index + 1} · ${shot.title}`}
                   aria-current={shot.id === selected?.id ? "page" : undefined}
                   className={shot.id === selected?.id ? "active" : ""}
-                  onClick={() => {
-                    setSelectedId(shot.id);
-                  }}
+                  onClick={() => selectShot(shot.id)}
                 >
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   <strong>{shot.title}</strong>
+                  <small>{shotWorkflowStatus(shot).label}</small>
                 </button>
               ))}
             </nav>
@@ -116,8 +131,33 @@ export function MobileShotDrawer({
               <article className="mobile-shot-document" aria-label={`${selected.title} shot design document`}>
                   <dl className="mobile-shot-meta">
                     <div><dt>Duration</dt><dd>{selected.duration_s}s</dd></div>
-                    <div><dt>Status</dt><dd>{shotWorkflowStatus(selected).label}</dd></div>
+                    <div><dt>Status</dt><dd>{stage?.label}</dd></div>
                   </dl>
+                  {selected.status === "failed" || selected.blocked_reasons.length ? (
+                    <div className="banner error" role="status">
+                      {selected.blocked_reasons[0] || "H3 failed for this shot."}
+                    </div>
+                  ) : null}
+                  {onSend ? (
+                    <div className="mobile-shot-actions">
+                      <button
+                        type="button"
+                        className="btn primary sm"
+                        disabled={sendDisabled}
+                        onClick={() => onSend(`Write the H3 prompt for shot ${selectedIndex + 1}`)}
+                      >
+                        Write H3 prompt
+                      </button>
+                      <button
+                        type="button"
+                        className="btn secondary sm"
+                        disabled={sendDisabled}
+                        onClick={() => onSend(`Discuss a Layout for shot ${selectedIndex + 1}`)}
+                      >
+                        Discuss a Layout
+                      </button>
+                    </div>
+                  ) : null}
 
                   <section id="mobile-shot-brief" className="mobile-shot-brief">
                     <span className="mobile-document-section-label">01 / Direction</span>

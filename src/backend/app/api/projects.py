@@ -160,7 +160,14 @@ class UpdateProjectBody(BaseModel):
     name: str | None = None
     script_text: str | None = None
     script_locked: bool | None = None
+    script_draft_pending: bool | None = None
     soul_id: str | None = None
+
+
+class ScreenplayInterviewBody(BaseModel):
+    message: str = ""
+    generate: bool = False
+    reset: bool = False
 
 
 class ChatHistoryItem(BaseModel):
@@ -192,6 +199,7 @@ class ChatResponse(BaseModel):
     images: list[ChatImageOut] = Field(default_factory=list)
     thinking: str = ""
     steps: list[str] = Field(default_factory=list)
+    choices: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ChatSessionStatus(BaseModel):
@@ -482,6 +490,10 @@ async def update_project_endpoint(
         updates["script_text"] = body.script_text
     if body.script_locked is not None:
         updates["script_locked"] = body.script_locked
+        if body.script_locked:
+            updates["script_draft_pending"] = False
+    if body.script_draft_pending is not None and "script_draft_pending" not in updates:
+        updates["script_draft_pending"] = body.script_draft_pending
     if body.soul_id is not None:
         from ..core.souls.store import get_soul
 
@@ -494,6 +506,37 @@ async def update_project_endpoint(
     project = project.model_copy(update=updates)
     save_project(project)
     return project
+
+
+@router.get("/projects/{project_id}/screenplay-interview")
+def get_screenplay_interview_endpoint(project_id: str) -> dict:
+    if load_project(project_id) is None:
+        raise HTTPException(404, "Project not found")
+    from ..agents.director.screenplay_interview import interview_public, load_interview
+
+    return interview_public(load_interview(project_id))
+
+
+@router.post("/projects/{project_id}/screenplay-interview")
+async def post_screenplay_interview_endpoint(
+    project_id: str,
+    body: ScreenplayInterviewBody,
+) -> dict:
+    if load_project(project_id) is None:
+        raise HTTPException(404, "Project not found")
+    from ..agents.director.screenplay_interview import run_interview_turn
+
+    try:
+        return await run_interview_turn(
+            project_id,
+            body.message,
+            generate=body.generate,
+            reset=body.reset,
+        )
+    except GenerationActiveError as exc:
+        raise _generation_active_http(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/projects/{project_id}/plan", response_model=ProjectDetailResponse)
@@ -526,6 +569,7 @@ def _chat_result_to_response(result) -> ChatResponse:
         ],
         thinking=getattr(result, "thinking", "") or "",
         steps=list(getattr(result, "steps", None) or []),
+        choices=list(getattr(result, "choices", None) or []),
     )
 
 
@@ -600,12 +644,15 @@ async def _make_chat_fn(
             model = _selected_model()
             capacity = await _refresh_context_capacity(model)
         if capacity is None:
-            if uses_local_capacity_discovery:
-                raise RuntimeError(
-                    f"{provider_id} did not report the loaded model context capacity"
-                )
             capacity = settings.director_num_ctx
             source = "configured_fallback"
+            if uses_local_capacity_discovery:
+                logger.warning(
+                    "%s did not report loaded context for %s; using configured %s",
+                    provider_id,
+                    model,
+                    capacity,
+                )
         else:
             source = "provider_reported"
         set_context_capacity(capacity, source)
@@ -856,6 +903,7 @@ async def project_chat_endpoint(
             project_id, role="assistant", content=response.reply,
             images=[DirectorChatImage.model_validate(image.model_dump()) for image in response.images],
             steps=list(response.steps or []),
+            choices=list(response.choices or []),
         )
         return response
     except ValueError as e:
@@ -1084,6 +1132,7 @@ async def _project_chat_stream_response(
                     for image in response.images
                 ],
                 steps=list(response.steps or []),
+                choices=list(response.choices or []),
             )
             await queue.put(
                 {"type": "result", "data": response.model_dump(mode="json")}

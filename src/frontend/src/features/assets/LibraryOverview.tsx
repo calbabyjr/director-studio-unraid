@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../../shared/project/ProjectContext";
 import {
   deleteLibraryAsset,
@@ -32,13 +32,17 @@ export function LibraryOverview({ onSelectKind }: {
   const [detailAsset, setDetailAsset] = useState<LibraryAsset | null>(null);
   const [editingAsset, setEditingAsset] = useState<LibraryAsset | null>(null);
 
-  const onMetadataSaved = (updated: LibraryAsset) => {
+  const applyAssetUpdate = useCallback((updated: LibraryAsset) => {
     const kind = updated.kind as VisibleLibraryKind;
     setGroups((current) => ({
       ...current,
       [kind]: (current[kind] || []).map((asset) => asset.id === updated.id ? updated : asset),
     }));
     setDetailAsset((current) => current?.id === updated.id ? updated : current);
+  }, []);
+
+  const onMetadataSaved = (updated: LibraryAsset) => {
+    applyAssetUpdate(updated);
     setEditingAsset(null);
   };
 
@@ -184,7 +188,7 @@ export function LibraryOverview({ onSelectKind }: {
           onEdit={() => setEditingAsset(detailAsset)}
           onMoveToCostumes={detailAsset.kind === "props" ? () => void onMoveToCostumes(detailAsset) : undefined}
           onDelete={() => void onDeleteAsset(detailAsset)}
-          onUpdated={onMetadataSaved}
+          onUpdated={applyAssetUpdate}
         />
       ) : null}
       {editingAsset ? (

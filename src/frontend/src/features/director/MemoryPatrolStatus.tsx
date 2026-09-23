@@ -39,7 +39,7 @@ export function MemoryPatrolStatus({ projectId }: { projectId: string }) {
   const intervalMin = Math.round((status.interval_sec || 1800) / 60);
 
   return (
-    <p className="director-soul-status" role="status">
+    <p className="director-memory-patrol" role="status">
       Memory check every {intervalMin} min. Last run {minutesAgo(status.last_run_at)}
       {count ? ` · ${count} open task${count === 1 ? "" : "s"}` : ""}.
     </p>

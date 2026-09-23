@@ -12,7 +12,7 @@ import {
 } from "../../shared/api/types";
 import { PageShell } from "../../shared/components/PageShell";
 import { useProject } from "../../shared/project/ProjectContext";
-import { promptReady, shotWorkflowStatus } from "../../shared/shotWorkflowStatus";
+import { firstActionableShotId, promptReady, shotWorkflowStatus } from "../../shared/shotWorkflowStatus";
 import {
   cancelH3Job,
   deleteLayout,
@@ -33,10 +33,81 @@ import { fetchH3Profiles } from "../../shared/api/client";
 import type { H3ActiveProfile } from "../../shared/api/types";
 
 const ACTIVE: JobStatus[] = ["queued", "uploading", "running"];
+const ACTIVE_SHOT_STATUS = new Set(["queued", "running"]);
+
 type ProjectLoadState = {
   projectId: string | null;
   status: "idle" | "loading" | "loaded" | "error";
 };
+
+function promptSignature(sections: PromptSections | null | undefined): string {
+  return PROMPT_SECTION_KEYS.map(({ key }) => sections?.[key] || "").join("\u0000");
+}
+
+function shotPollKey(shot: Shot): string {
+  return JSON.stringify({
+    id: shot.id,
+    status: shot.status,
+    h3_job_id: shot.h3_job_id,
+    title: shot.title,
+    duration_s: shot.duration_s,
+    layout_asset_id: shot.layout_asset_id,
+    script_beat: shot.script_beat,
+    shot_type: shot.shot_type,
+    camera_angle: shot.camera_angle,
+    camera_motion: shot.camera_motion,
+    composition: shot.composition,
+    prompt_sections: shot.prompt_sections,
+    dialogue: shot.dialogue,
+    refs: shot.refs,
+    voice_refs: shot.voice_refs,
+    layout_refs: shot.layout_refs.map((layout) => ({
+      id: layout.id,
+      asset_id: layout.asset_id,
+      job_status: layout.job_status,
+      review_status: layout.review_status,
+      selected_for_h3: layout.selected_for_h3,
+    })),
+    blocked_reasons: shot.blocked_reasons,
+    feedback: shot.feedback,
+    source_audio_path: shot.source_audio_path,
+    meta: shot.meta,
+  });
+}
+
+function mergeShots(prev: Shot[], next: Shot[]): Shot[] {
+  if (prev === next) return prev;
+  const prevById = new Map(prev.map((shot) => [shot.id, shot]));
+  let changed = prev.length !== next.length;
+  const merged = next.map((shot, index) => {
+    const old = prevById.get(shot.id);
+    if (!old) {
+      changed = true;
+      return shot;
+    }
+    if (shotPollKey(old) === shotPollKey(shot)) {
+      if (prev[index]?.id !== shot.id) changed = true;
+      return old;
+    }
+    // A poll can lag behind a local Submit H3. Keep the in-flight job so the
+    // selected editor does not jump back to "no H3 job yet".
+    if (old.h3_job_id && !shot.h3_job_id && ACTIVE_SHOT_STATUS.has(old.status)) {
+      return old;
+    }
+    changed = true;
+    return shot;
+  });
+  if (!changed && prev.every((shot, index) => shot.id === merged[index]?.id)) return prev;
+  return merged;
+}
+
+function shotHasActiveH3(shot: Shot): boolean {
+  return Boolean(shot.h3_job_id) && ACTIVE_SHOT_STATUS.has(shot.status);
+}
+
+function takeLabel(index: number, take: { pinned: boolean }): string {
+  return `Take ${String(index + 1).padStart(2, "0")}${take.pinned ? " · pinned" : ""}`;
+}
 
 function ProductionWorkflowProfile({ profile, error, job }: {
   profile: H3ActiveProfile | null;
@@ -236,12 +307,16 @@ export function ProductionPage({
     ) || [...selected.layout_refs].reverse().find((layout) => layout.asset_id) || null;
   }, [selected]);
 
+  const applyShots = useCallback((next: Shot[]) => {
+    setShots((prev) => mergeShots(prev, next));
+  }, []);
+
   const loadProject = useCallback(async (id: string) => {
     const detail = await getProject(id);
-    setShots(detail.shots);
+    applyShots(detail.shots);
     setProjectLoad({ projectId: id, status: "loaded" });
     return detail;
-  }, []);
+  }, [applyShots]);
 
   useEffect(() => {
     setSelectedId(null);
@@ -256,7 +331,7 @@ export function ProductionPage({
   // Pages stay mounted across top-level tab switches. Refresh when Production
   // becomes visible so Director-side prompt/layout changes are not stale.
   useEffect(() => {
-    if (!projectId) return;
+    if (!active || !projectId) return;
     let cancelled = false;
     setError(null);
     setProjectLoad((current) => current.projectId === projectId && current.status === "loaded"
@@ -265,7 +340,7 @@ export function ProductionPage({
     getProject(projectId)
       .then((detail) => {
         if (cancelled) return;
-        setShots(detail.shots);
+        applyShots(detail.shots);
         setProjectLoad({ projectId, status: "loaded" });
         setError(null);
       })
@@ -280,7 +355,7 @@ export function ProductionPage({
     return () => {
       cancelled = true;
     };
-  }, [active, projectId]);
+  }, [active, applyShots, projectId]);
 
   const projectLoading = Boolean(
     projectId
@@ -316,12 +391,15 @@ export function ProductionPage({
     };
   }, [active]);
 
+  const shotIdsKey = shots.map((shot) => shot.id).join("|");
   useEffect(() => {
-    if (!mobile || shots.length === 0) return;
+    if (shots.length === 0) return;
     setSelectedId((current) =>
-      current && shots.some((shot) => shot.id === current) ? current : shots[0].id,
+      current && shots.some((shot) => shot.id === current)
+        ? current
+        : firstActionableShotId(shots),
     );
-  }, [mobile, shots]);
+  }, [shotIdsKey, shots]);
 
   useEffect(() => {
     if (!active || !projectId) {
@@ -367,12 +445,31 @@ export function ProductionPage({
     setVoiceRefsDirty(false);
   }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const selectedPromptSignature = promptSignature(selected?.prompt_sections);
+  const selectedDialogueKey = (selected?.dialogue || []).join("\n");
+  const selectedDurationKey = String(selected?.duration_s ?? 8);
+  const selectedVoiceKey = JSON.stringify(selected?.voice_refs || []);
+
   // Accept Director-side prompt generation for the selected shot, but never
   // overwrite text the user has changed locally and not saved yet.
   useEffect(() => {
     if (!selected || promptDirty) return;
-    setDraftPrompt({ ...EMPTY_PROMPT_SECTIONS, ...selected.prompt_sections });
-  }, [selected?.prompt_sections, promptDirty]); // eslint-disable-line react-hooks/exhaustive-deps
+    const nextPrompt = { ...EMPTY_PROMPT_SECTIONS, ...selected.prompt_sections };
+    setDraftPrompt((current) =>
+      promptSignature(current) === selectedPromptSignature ? current : nextPrompt,
+    );
+    setDraftDialogue(selectedDialogueKey);
+    setDraftDuration(selectedDurationKey);
+  }, [promptDirty, selected, selectedDialogueKey, selectedDurationKey, selectedPromptSignature]);
+
+  useEffect(() => {
+    if (!selected || voiceRefsDirty) return;
+    setDraftVoiceRefs(
+      [...(selected.voice_refs || [])]
+        .sort((a, b) => a.audio_index - b.audio_index)
+        .map((ref, index) => ({ ...ref, audio_index: index + 1 })),
+    );
+  }, [selected, selectedVoiceKey, voiceRefsDirty]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const jobId = selected?.h3_job_id;
@@ -400,26 +497,49 @@ export function ProductionPage({
     };
   }, [active, selected?.h3_job_id]);
 
-  const shotsRunning = shots.some((s) => ACTIVE.includes(s.status as JobStatus));
+  const shotsRunning =
+    shots.some(shotHasActiveH3) || Boolean(h3Job && ACTIVE.includes(h3Job.status));
   useEffect(() => {
     if (!active || !projectId || !shotsRunning) return;
     const t = window.setInterval(() => {
       getProject(projectId)
-        .then((d) => setShots(d.shots))
+        .then((d) => applyShots(d.shots))
         .catch(() => undefined);
     }, 3000);
     return () => window.clearInterval(t);
-  }, [active, projectId, shotsRunning]);
+  }, [active, applyShots, projectId, shotsRunning]);
 
   useEffect(() => {
-    if (!projectId || !selectedId || tab !== "run") return;
+    if (!active || !projectId || !selectedId) return;
+    if (!mobile && tab !== "run") return;
+    let cancelled = false;
     listShotTakes(projectId, selectedId)
-      .then((payload) => setTakes(payload.items || []))
-      .catch(() => setTakes([]));
-  }, [projectId, selectedId, tab, h3Job?.id, h3Job?.status]);
+      .then((payload) => {
+        if (!cancelled) setTakes(payload.items || []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [active, mobile, projectId, selectedId, tab, h3Job?.id, h3Job?.status]);
+
+  useEffect(() => {
+    setTakes([]);
+  }, [selectedId]);
 
   const replaceShot = (updated: Shot) => {
     setShots((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+  };
+
+  const onPinTake = (jobId: string) => {
+    if (!projectId || !selected) return;
+    void pinShotTake(projectId, selected.id, jobId)
+      .then(() => loadProject(projectId))
+      .then(() => listShotTakes(projectId, selected.id))
+      .then((payload) => setTakes(payload.items || []))
+      .catch((cause) => setError(
+        cause instanceof Error ? cause.message : String(cause),
+      ));
   };
 
   const onSavePrompt = async () => {
@@ -638,6 +758,29 @@ export function ProductionPage({
     </label>
   );
 
+  const takesList = takes.length ? (
+    <div className="takes-list" aria-label="Takes">
+      <strong>Takes</strong>
+      {takes.map((take, index) => (
+        <div key={take.id} className="takes-list-item muted tiny">
+          <span title={take.id}>{takeLabel(index, take)}</span>
+          <span>{take.status}</span>
+          {take.pinned ? (
+            <span>pinned</span>
+          ) : take.status === "succeeded" && projectId && selected ? (
+            <button
+              type="button"
+              className="btn ghost sm"
+              onClick={() => onPinTake(take.id)}
+            >
+              Pin
+            </button>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  ) : null;
+
   if (mobile) {
     const selectedNumber = selected
       ? Math.max(0, shots.findIndex((shot) => shot.id === selected.id)) + 1
@@ -664,6 +807,7 @@ export function ProductionPage({
         <SequencePanel
           projectId={projectId}
           active={active}
+          live={shotsRunning}
           mobile
           onSelectShot={(shotId) => {
             setSelectedId(shotId);
@@ -723,8 +867,8 @@ export function ProductionPage({
                 <p className="mobile-production-empty-inline">No final video for this shot yet.</p>
               )}
               {h3Job?.error ? (
-                <div className="mobile-production-job-error" role="status">
-                  Generation failed. Open desktop Production for diagnostic details.
+                <div className="mobile-production-job-error banner error" role="status">
+                  {h3Job.error}
                 </div>
               ) : null}
               {providerPicker}
@@ -737,6 +881,7 @@ export function ProductionPage({
               >
                 {jobActive ? "H3 running…" : "Run H3"}
               </button>
+              {takesList}
             </section>
 
             <section className="mobile-production-section">
@@ -858,6 +1003,7 @@ export function ProductionPage({
       <SequencePanel
         projectId={projectId}
         active={active}
+        live={shotsRunning}
         onSelectShot={setSelectedId}
       />
 
@@ -888,14 +1034,21 @@ export function ProductionPage({
                       <tr
                         key={s.id}
                         className={s.id === selectedId ? "selected" : ""}
-                        onClick={() => setSelectedId(s.id)}
                       >
-                        <td>
-                          <div className="shot-table-title">{s.title || s.id}</div>
-                          <div className="muted tiny">{s.duration_s}s</div>
-                        </td>
-                        <td>
-                          <ProductionStatusChip shot={s} />
+                        <td colSpan={2} className="shot-table-select-cell">
+                          <button
+                            type="button"
+                            className="shot-table-select"
+                            aria-current={s.id === selectedId ? "true" : undefined}
+                            aria-label={`${s.title || s.id} · ${shotWorkflowStatus(s).label}`}
+                            onClick={() => setSelectedId(s.id)}
+                          >
+                            <span>
+                              <span className="shot-table-title">{s.title || s.id}</span>
+                              <span className="muted tiny">{s.duration_s}s</span>
+                            </span>
+                            <ProductionStatusChip shot={s} />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1166,7 +1319,10 @@ export function ProductionPage({
                           rows={3}
                           value={draftDialogue}
                           disabled={busy || jobActive}
-                          onChange={(e) => setDraftDialogue(e.target.value)}
+                          onChange={(e) => {
+                            setPromptDirty(true);
+                            setDraftDialogue(e.target.value);
+                          }}
                         />
                       </label>
                       <label className="field">
@@ -1174,7 +1330,10 @@ export function ProductionPage({
                         <input
                           value={draftDuration}
                           disabled={busy || jobActive}
-                          onChange={(e) => setDraftDuration(e.target.value)}
+                          onChange={(e) => {
+                            setPromptDirty(true);
+                            setDraftDuration(e.target.value);
+                          }}
                           inputMode="decimal"
                         />
                       </label>
@@ -1249,36 +1408,6 @@ export function ProductionPage({
                       <p className="field-hint">No H3 job yet for this shot.</p>
                     )}
 
-                    {takes.length ? (
-                      <div className="takes-list">
-                        <strong>Takes</strong>
-                        {takes.map((take) => (
-                          <div key={take.id} className="takes-list-item muted tiny">
-                            <code>{take.id}</code> · {take.status}
-                            {take.pinned ? " · pinned" : (
-                              take.status === "succeeded" && projectId && selected ? (
-                                <button
-                                  type="button"
-                                  className="btn ghost sm"
-                                  onClick={() => {
-                                    void pinShotTake(projectId, selected.id, take.id)
-                                      .then(() => loadProject(projectId))
-                                      .then(() => listShotTakes(projectId, selected.id))
-                                      .then((payload) => setTakes(payload.items || []))
-                                      .catch((cause) => setError(
-                                        cause instanceof Error ? cause.message : String(cause),
-                                      ));
-                                  }}
-                                >
-                                  Pin
-                                </button>
-                              ) : null
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-
                     {providerPicker}
 
                     <div className="production-submit-actions">
@@ -1301,6 +1430,7 @@ export function ProductionPage({
                         </button>
                       ) : null}
                     </div>
+                    {takesList}
                   </div>
                 ) : null}
               </div>

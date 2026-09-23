@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PropsPage } from "./PropsPage";
-import { generateCostume, generateProp, listCostumeJobs, listPropJobs } from "./api";
+import { generateCostume, generateProp, getCostumeJob, getPropJob, listCostumeJobs, listPropJobs } from "./api";
 import type { PropJobRecord } from "./api";
 
 vi.mock("../../shared/project/ProjectContext", () => ({
@@ -34,12 +34,47 @@ const finishedPropJob: PropJobRecord = {
 };
 
 describe("PropsPage", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listPropJobs).mockResolvedValue([]);
     vi.mocked(listCostumeJobs).mockResolvedValue([]);
+  });
+
+  it("does not list prop or costume jobs while the category is hidden", async () => {
+    render(<PropsPage active={false} onOpenLibrary={() => undefined} />);
+    render(<PropsPage kind="costume" active={false} onOpenLibrary={() => undefined} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(listPropJobs).not.toHaveBeenCalled();
+    expect(listCostumeJobs).not.toHaveBeenCalled();
+  });
+
+  it("does not poll an in-flight prop job while the category is hidden", async () => {
+    const running: PropJobRecord = { ...finishedPropJob, id: "propjob_run", status: "running", name: "Knife" };
+    vi.mocked(listPropJobs).mockResolvedValue([running]);
+    vi.mocked(getPropJob).mockResolvedValue(running);
+
+    const { rerender } = render(<PropsPage onOpenLibrary={() => undefined} />);
+    expect(await screen.findByText("Preparing reference sheet…")).toBeTruthy();
+
+    vi.useFakeTimers();
+    rerender(<PropsPage active={false} onOpenLibrary={() => undefined} />);
+    vi.mocked(getPropJob).mockClear();
+    vi.mocked(getCostumeJob).mockClear();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getPropJob).not.toHaveBeenCalled();
+    expect(getCostumeJob).not.toHaveBeenCalled();
   });
 
   it("presents the prop result as a multi-view reference sheet", async () => {

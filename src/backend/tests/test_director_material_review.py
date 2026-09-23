@@ -8,6 +8,7 @@ import pytest
 from PIL import Image
 
 from app.config import settings
+from app.agents.director.material_review import _observation_payload
 from app.agents.director.service import DirectorService
 from app.core.projects.models import (
     AssetCoverageRecommendation,
@@ -19,6 +20,15 @@ from app.core.projects.models import (
 )
 from app.core.projects.store import create_project, load_shot, save_project, save_shot
 from app.core.schemas import LibraryAsset
+
+
+def test_observation_payload_accepts_a_list_of_strings():
+    payload = _observation_payload(
+        '["Image is a static character sheet.", "No performance direction."]'
+    )
+    assert payload["readable"] is True
+    assert "character sheet" in payload["description"]
+    assert payload["concerns"] == []
 
 
 class Orchestrator:

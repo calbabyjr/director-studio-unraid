@@ -33,7 +33,9 @@ def project_context_blob(
     )
     # Suggested next step for the model (also enforced in tool sanitizer).
     if not script.strip():
-        next_step = "ask_or_set_script"
+        next_step = "draft_screenplay"
+    elif project.script_draft_pending and not project.script_locked:
+        next_step = "lock_script"
     elif (not shots or shots_stale) and not coverage_current:
         next_step = "review_asset_coverage"
     elif not shots or shots_stale:

@@ -33,12 +33,30 @@ vi.mock("../library/api", () => ({
   }] : []),
 }));
 vi.mock("../casting/CastingPage", () => ({
-  CastingPage: () => <label>Actor generator<input aria-label="Mobile actor draft" /></label>,
+  CastingPage: ({ active }: { active?: boolean }) => (
+    <label>
+      Actor generator
+      <input aria-label="Mobile actor draft" />
+      <span data-testid="mobile-casting-active">{active ? "yes" : "no"}</span>
+    </label>
+  ),
 }));
-vi.mock("../set/SetDesignPage", () => ({ SetDesignPage: () => <div>Scene generator</div> }));
+vi.mock("../set/SetDesignPage", () => ({
+  SetDesignPage: ({ active }: { active?: boolean }) => (
+    <div>
+      Scene generator
+      <span data-testid="mobile-scene-active">{active ? "yes" : "no"}</span>
+    </div>
+  ),
+}));
 vi.mock("../props/PropsPage", () => ({
-  PropsPage: ({ kind }: { kind?: string }) => (
-    <div>{kind === "costume" ? "Costume generator" : "Prop generator"}</div>
+  PropsPage: ({ kind, active }: { kind?: string; active?: boolean }) => (
+    <div>
+      {kind === "costume" ? "Costume generator" : "Prop generator"}
+      <span data-testid={kind === "costume" ? "mobile-costume-active" : "mobile-prop-active"}>
+        {active ? "yes" : "no"}
+      </span>
+    </div>
   ),
 }));
 
@@ -149,5 +167,18 @@ describe("MobileAssetWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Actors" }));
 
     expect((screen.getByRole("textbox", { name: "Mobile actor draft" }) as HTMLInputElement).value).toBe("Keep this mobile reference");
+  });
+
+  it("marks only the visible mobile preparation category as active", () => {
+    render(<MobileAssetWorkspace />);
+
+    expect(screen.getByTestId("mobile-casting-active").textContent).toBe("no");
+    expect(screen.getByTestId("mobile-scene-active").textContent).toBe("no");
+    expect(screen.getByTestId("mobile-prop-active").textContent).toBe("no");
+    expect(screen.getByTestId("mobile-costume-active").textContent).toBe("no");
+
+    fireEvent.click(screen.getByRole("button", { name: "Props" }));
+    expect(screen.getByTestId("mobile-prop-active").textContent).toBe("yes");
+    expect(screen.getByTestId("mobile-casting-active").textContent).toBe("no");
   });
 });

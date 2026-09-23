@@ -231,12 +231,8 @@ export function JsonProductionPage({
 
   useEffect(() => {
     resetWorkspace();
-    if (!projectId) {
-      loadGenRef.current += 1;
-      return;
-    }
-    void loadStoryboard(projectId);
-  }, [projectId, loadStoryboard, resetWorkspace]);
+    if (!projectId) loadGenRef.current += 1;
+  }, [projectId, resetWorkspace]);
 
   useEffect(() => {
     if (!active || !projectId) return;
@@ -267,14 +263,22 @@ export function JsonProductionPage({
     return () => revokeUrls(previewRef.current);
   }, []);
 
+  const shotIdsKey = storyboard?.shots.map((s) => s.id).join(",") ?? "";
+  const hasActiveJobs = useMemo(
+    () => [...jobsByShotId.values()].some((jobs) => jobs.some((job) => ACTIVE.includes(job.status))),
+    [jobsByShotId],
+  );
+
   useEffect(() => {
     if (!active || !projectId || !storyboard?.shots.length) return;
     let cancelled = false;
+    const revision = storyboard.revision;
+    const shotIds = storyboard.shots.map((shot) => shot.id);
 
-    const refresh = async (shotIds: string[]) => {
+    const refresh = async (ids: string[]) => {
       const entries = await Promise.all(
-        shotIds.map(async (shotId) => {
-          const jobs = await listJsonShotJobs(projectId, shotId, storyboard.revision);
+        ids.map(async (shotId) => {
+          const jobs = await listJsonShotJobs(projectId, shotId, revision);
           return [shotId, jobs] as const;
         }),
       );
@@ -286,19 +290,36 @@ export function JsonProductionPage({
       });
     };
 
-    void refresh(storyboard.shots.map((shot) => shot.id));
+    void refresh(shotIds);
+    return () => {
+      cancelled = true;
+    };
+  }, [active, projectId, storyboard?.revision, shotIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!active || !projectId || !hasActiveJobs) return;
+    const revision = storyboard?.revision;
+    if (revision == null) return;
     const timer = window.setInterval(() => {
       const activeIds = [...jobsRef.current.entries()]
         .filter(([, jobs]) => jobs.some((job) => ACTIVE.includes(job.status)))
         .map(([shotId]) => shotId);
-      if (activeIds.length) void refresh(activeIds);
+      if (!activeIds.length) return;
+      void Promise.all(
+        activeIds.map(async (shotId) => {
+          const jobs = await listJsonShotJobs(projectId, shotId, revision);
+          return [shotId, jobs] as const;
+        }),
+      ).then((entries) => {
+        setJobsByShotId((prev) => {
+          const next = new Map(prev);
+          for (const [shotId, jobs] of entries) next.set(shotId, jobs);
+          return next;
+        });
+      });
     }, 1500);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [active, projectId, storyboard?.revision, storyboard?.shots.map((s) => s.id).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => window.clearInterval(timer);
+  }, [active, hasActiveJobs, projectId, storyboard?.revision]);
 
   const importJsonText = async (text: string) => {
     if (!projectId) return;

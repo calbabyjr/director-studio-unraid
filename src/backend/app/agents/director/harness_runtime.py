@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -17,7 +18,8 @@ from ...core.projects.store import list_shots, load_project
 from .chat_context import project_context_blob, gpt_generation_context_blob
 from .chat_orchestrator import (
     DIRECTOR_CHAT_SYSTEM, ChatResult, _StoryboardSubmissionBudget,
-    _claims_completed_storyboard, _layout_images, _requested_minimum_duration_s,
+    _claims_completed_storyboard, _claims_pending_tool, _layout_images,
+    _requested_minimum_duration_s, pending_tool_continuation,
     sanitize_tools_for_pipeline,
 )
 from .harness_client import HarnessClient, HarnessError
@@ -37,6 +39,52 @@ def harness_input_budget(context_capacity: int, image_count: int = 0) -> int:
     if budget < 256:
         raise ValueError("Current images and output allowance leave no usable context budget; send fewer images.")
     return budget
+
+
+def bounded_harness_history(rows: list | None, budget_tokens: int) -> list[dict]:
+    """Keep the newest chat rows that fit a fraction of the Harness input budget.
+
+    Harness TokenMeter uses ~4 characters per token. A 32k local window cannot
+    summarize a 400-message session in one pass; sending the full native
+    transcript makes compaction abort the turn.
+    """
+    clean = [
+        {"role": row["role"], "content": row["content"]}
+        for row in (rows or [])
+        if isinstance(row, dict)
+        and row.get("role") in {"user", "assistant"}
+        and isinstance(row.get("content"), str)
+    ]
+    if not clean:
+        return []
+    budget_chars = max(4000, int(budget_tokens * 4 * 0.35))
+    kept: list[dict] = []
+    used = 0
+    for row in reversed(clean):
+        size = len(row["content"])
+        if kept and used + size > budget_chars:
+            break
+        kept.append(row)
+        used += size
+    kept.reverse()
+    omitted = len(clean) - len(kept)
+    if omitted <= 0:
+        return kept
+    return [
+        {
+            "role": "user",
+            "content": (
+                f"[Earlier Director chat omitted {omitted} messages because they exceeded "
+                f"the {budget_tokens}-token working window. Use current project facts and "
+                "the recent turns.]"
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": "Understood. I will use the current project and the recent conversation.",
+        },
+        *kept,
+    ]
 
 
 class BackendTurn:
@@ -67,6 +115,7 @@ class BackendTurn:
         self.local_generation_receipt: str | None = None
         self.offered_context: dict | None = None
         self.offered_version: str | None = None
+        self.pending_choices: list = []
 
     def snapshot(self):
         project = load_project(self.project_id)
@@ -226,17 +275,20 @@ class BackendTurn:
                 if message["role"] == "user":
                     message["images"] = self.images
                     break
+        infer_kwargs = {
+            "tools": offered_tools,
+            "images": None if compacting else self.images or None,
+            "require_vision": bool(self.images) and not compacting,
+            "inference_purpose": purpose,
+            "prepared_system": True,
+            "guides": () if compacting else director_chat_guides(
+                project, include_visual_qc=bool(self.images), current_message=self.message
+            ),
+        }
+        if max_output is not None:
+            infer_kwargs["max_output_tokens"] = min(max_output, settings.director_num_predict)
         try:
-            result = await self.chat_fn(
-                system, self.message, messages=messages,
-                tools=offered_tools,
-                images=None if compacting else self.images or None,
-                require_vision=bool(self.images) and not compacting,
-                inference_purpose=purpose,
-                prepared_system=True,
-                **({"max_output_tokens": min(max_output, settings.director_num_predict)} if max_output is not None else {}),
-                guides=() if compacting else director_chat_guides(project, include_visual_qc=bool(self.images), current_message=self.message),
-            )
+            result = await self.chat_fn(system, self.message, messages=messages, **infer_kwargs)
         except GenerationActiveError:
             if compacting or not self.local_generation_receipt:
                 raise
@@ -247,6 +299,18 @@ class BackendTurn:
             }
         if not isinstance(result, dict):
             raise ValueError("Harness requires native model tool responses")
+        content = str(result.get("content") or "")
+        if (
+            not compacting
+            and not (result.get("tool_calls") or [])
+            and _claims_pending_tool(content)
+        ):
+            follow = [dict(item) for item in messages]
+            follow.append({"role": "assistant", "content": content})
+            follow.append({"role": "user", "content": pending_tool_continuation(content)})
+            retry = await self.chat_fn(system, self.message, messages=follow, **infer_kwargs)
+            if isinstance(retry, dict):
+                result = retry
         return result
 
     async def tool(self, params):
@@ -338,6 +402,8 @@ class BackendTurn:
         result = {"ok": True, "notes": notes}
         for payload in payloads:
             result.update(payload)
+            if payload.get("choices"):
+                self.pending_choices = list(payload["choices"])
         if result["ok"] and len(self.actions) == before and not payloads:
             result.update(ok=False, error="No successful operation confirmed. " + " ".join(notes))
         if name == "save_storyboard":
@@ -403,7 +469,8 @@ class BackendTurn:
         except Exception:
             pass
         return ChatResult(reply=reply, project=project, shots=shots, actions=self.actions,
-                          images=images, thinking=result.get("thinking", ""), steps=self.notes)
+                          images=images, thinking=result.get("thinking", ""), steps=self.notes,
+                          choices=list(self.pending_choices))
 
 
 async def handle_harness_chat(*, project_id, message, svc, chat_fn=None, history=None,
@@ -421,35 +488,67 @@ async def handle_harness_chat(*, project_id, message, svc, chat_fn=None, history
         if wants_vision(message) or layout_ids:
             pack = collect_vision_attachments(project_id=project_id, shots=shots, message=message, layout_ref_ids=layout_ids or None)
             turn.images = list(pack.get("images_b64") or [])
+    budget = harness_input_budget(context_capacity, len(turn.images))
+    seed = bounded_harness_history(history, budget)
+    turn.seed_history = seed
+
+    async def _run(session_id: str, rows: list[dict]) -> dict:
+        return await HarnessClient(
+            settings.harness_base_url,
+            settings.harness_internal_token,
+            timeout=settings.harness_turn_timeout_sec,
+        ).run(
+            {
+                "message": message,
+                "history": rows,
+                "session_id": session_id,
+                # Harness meters prompt pressure. Reserve the provider-reported
+                # completion allowance so long history is compacted before it can
+                # consume the space Qwen needs to finish reasoning and tool output.
+                "context_window": budget,
+                "max_steps": settings.harness_max_steps,
+            },
+            turn.dispatch,
+            on_progress,
+        )
+
     try:
-        result = await HarnessClient(settings.harness_base_url, settings.harness_internal_token,
-                                     timeout=settings.harness_turn_timeout_sec).run(
-            {"message": message, "history": [],
-             "session_id": harness_session_id(project_id),
-             # Harness meters prompt pressure. Reserve the provider-reported
-             # completion allowance so long history is compacted before it can
-             # consume the space Qwen needs to finish reasoning and tool output.
-             "context_window": harness_input_budget(context_capacity, len(turn.images)),
-             "max_steps": settings.harness_max_steps},
-            turn.dispatch, on_progress,
-        )
+        result = await _run(harness_session_id(project_id), [])
     except HarnessError as exc:
-        if exc.code != "MAX_STEPS":
+        if exc.code == "COMPACTION_FAILED":
+            if on_progress:
+                await on_progress({
+                    "type": "runtime",
+                    "text": "History was too large to compact in the model window; continuing from recent turns.",
+                })
+            try:
+                result = await _run(harness_session_id(project_id, nonce=str(time.time_ns())), seed)
+            except HarnessError as retry_exc:
+                if retry_exc.code != "COMPACTION_FAILED":
+                    raise
+                if on_progress:
+                    await on_progress({
+                        "type": "runtime",
+                        "text": "Continuing without prior chat turns in this working window.",
+                    })
+                result = await _run(harness_session_id(project_id, nonce=str(time.time_ns())), [])
+        elif exc.code != "MAX_STEPS":
             raise
-        confirmed = " ".join(turn.notes[-3:]).strip()
-        detail = (
-            f" Last confirmed issue: {turn.terminal_failure}"
-            if turn.terminal_failure
-            else f" Confirmed before stopping: {confirmed}" if confirmed else ""
-        )
-        result = {
-            "reply": (
-                "I couldn't safely complete this request in one turn. Any listed tool "
-                "results were preserved; any additional action is not confirmed."
-                f"{detail} Please continue with the specific pending step you want next."
-            ),
-            "thinking": "",
-        }
+        else:
+            confirmed = " ".join(turn.notes[-3:]).strip()
+            detail = (
+                f" Last confirmed issue: {turn.terminal_failure}"
+                if turn.terminal_failure
+                else f" Confirmed before stopping: {confirmed}" if confirmed else ""
+            )
+            result = {
+                "reply": (
+                    "I couldn't safely complete this request in one turn. Any listed tool "
+                    "results were preserved; any additional action is not confirmed."
+                    f"{detail} Please continue with the specific pending step you want next."
+                ),
+                "thinking": "",
+            }
     return turn.finish(result)
 
 
@@ -465,9 +564,12 @@ def _needs_fresh_storyboard(project, shots) -> bool:
     return not shots or planned_hash != _script_hash(script)
 
 
-def harness_session_id(project_id: str) -> str:
+def harness_session_id(project_id: str, nonce: str | None = None) -> str:
     """Stable execution identity; separate data roots never share a transcript."""
-    return hashlib.sha256(f"{settings.projects_dir.resolve().as_posix()}\n{project_id}".encode()).hexdigest()
+    payload = f"{settings.projects_dir.resolve().as_posix()}\n{project_id}"
+    if nonce:
+        payload += f"\n{nonce}"
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 async def compact_harness_chat(*, project_id, chat_fn, history=None, on_progress=None,
@@ -475,13 +577,30 @@ async def compact_harness_chat(*, project_id, chat_fn, history=None, on_progress
     if context_capacity is None:
         resolver = getattr(chat_fn, "resolve_context_capacity", None)
         context_capacity = await resolver() if resolver is not None else settings.director_num_ctx
-    turn = BackendTurn(project_id, "", None, chat_fn, on_progress=on_progress, compact_only=True, history=history)
-    result = await HarnessClient(settings.harness_base_url, settings.harness_internal_token,
-                                 timeout=settings.harness_turn_timeout_sec).run(
-        {"message": "", "history": [], "session_id": harness_session_id(project_id),
-         "operation": "compact", "context_window": harness_input_budget(context_capacity),
-         "max_steps": settings.harness_max_steps}, turn.dispatch, on_progress,
-    )
+    budget = harness_input_budget(context_capacity)
+    seed = bounded_harness_history(history, budget)
+    turn = BackendTurn(project_id, "", None, chat_fn, on_progress=on_progress, compact_only=True, history=seed)
+    client = HarnessClient(settings.harness_base_url, settings.harness_internal_token,
+                           timeout=settings.harness_turn_timeout_sec)
+    body = {
+        "message": "",
+        "history": [],
+        "session_id": harness_session_id(project_id),
+        "operation": "compact",
+        "context_window": budget,
+        "max_steps": settings.harness_max_steps,
+    }
+    try:
+        result = await client.run(body, turn.dispatch, on_progress)
+    except HarnessError as exc:
+        if exc.code != "COMPACTION_FAILED":
+            raise
+        body = {
+            **body,
+            "history": seed,
+            "session_id": harness_session_id(project_id, nonce=str(time.time_ns())),
+        }
+        result = await client.run(body, turn.dispatch, on_progress)
     if not isinstance(result.get("compaction"), dict):
         raise ValueError("Harness did not confirm a compaction result; update/restart the sidecar")
     return result["compaction"]

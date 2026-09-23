@@ -39,33 +39,56 @@ class ComfyMcpError(RuntimeError):
     pass
 
 
-def _repair_save_video_dynamic_codec(
+_MISSING_BOOLEAN_DEFAULTS = {
+    "enable_temporal_chunking": True,
+    "force_unload": True,
+}
+
+
+def apply_known_required_defaults(graph: dict[str, Any]) -> dict[str, Any]:
+    """Fill required MiniMax H3 upscaler flags Comfy now demands."""
+    updated = copy.deepcopy(graph)
+    for node in updated.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") != "MinimaxH3LatentUpscaler3D":
+            continue
+        inputs = node.setdefault("inputs", {})
+        if not isinstance(inputs, dict):
+            continue
+        inputs.setdefault("enable_temporal_chunking", True)
+        inputs.setdefault("force_unload", True)
+    return updated
+
+
+def _repair_graph_for_validation(
     graph: dict[str, Any], errors: list[Any]
 ) -> dict[str, Any] | None:
-    """Bridge the old and new ComfyUI SaveVideo API input layouts."""
-
+    """Fill required inputs that newer Comfy node APIs added after the graph was exported."""
     repaired = copy.deepcopy(graph)
     changed = False
     for error in errors:
         if not isinstance(error, dict):
             continue
-        if (
-            error.get("code") != "required_input_missing"
-            or error.get("field") != "format.codec"
-        ):
+        if error.get("code") != "required_input_missing":
             continue
+        field = str(error.get("field") or "")
         node_id = str(error.get("node_id") or "")
         node = repaired.get(node_id)
-        if not isinstance(node, dict) or node.get("class_type") != "SaveVideo":
+        if not isinstance(node, dict):
             continue
         inputs = node.get("inputs")
-        if not isinstance(inputs, dict) or "format.codec" in inputs:
+        if not isinstance(inputs, dict) or not field or field in inputs:
             continue
-        codec = inputs.get("codec")
-        if not isinstance(codec, str) or not codec:
+        if field == "format.codec" and node.get("class_type") == "SaveVideo":
+            codec = inputs.get("codec")
+            if isinstance(codec, str) and codec:
+                inputs[field] = codec
+                changed = True
             continue
-        inputs["format.codec"] = codec
-        changed = True
+        if field in _MISSING_BOOLEAN_DEFAULTS:
+            inputs[field] = _MISSING_BOOLEAN_DEFAULTS[field]
+            changed = True
     return repaired if changed else None
 
 
@@ -83,36 +106,6 @@ def format_validation_errors(payload: dict[str, Any]) -> str:
         ensure_ascii=False,
     )
     return f"MCP workflow validation failed: {detail}"
-
-
-def _repair_save_video_dynamic_codec(
-    graph: dict[str, Any], errors: list[Any]
-) -> dict[str, Any] | None:
-    """Bridge the old and new ComfyUI SaveVideo API input layouts."""
-
-    repaired = copy.deepcopy(graph)
-    changed = False
-    for error in errors:
-        if not isinstance(error, dict):
-            continue
-        if (
-            error.get("code") != "required_input_missing"
-            or error.get("field") != "format.codec"
-        ):
-            continue
-        node_id = str(error.get("node_id") or "")
-        node = repaired.get(node_id)
-        if not isinstance(node, dict) or node.get("class_type") != "SaveVideo":
-            continue
-        inputs = node.get("inputs")
-        if not isinstance(inputs, dict) or "format.codec" in inputs:
-            continue
-        codec = inputs.get("codec")
-        if not isinstance(codec, str) or not codec:
-            continue
-        inputs["format.codec"] = codec
-        changed = True
-    return repaired if changed else None
 
 
 @dataclass(frozen=True)
@@ -324,6 +317,7 @@ class ComfyMcpClient:
         return result
 
     async def submit_workflow(self, graph: dict[str, Any]) -> str:
+        graph = apply_known_required_defaults(graph)
         with self._temporary_workflow(graph) as workflow_path:
             validation = await self._validate_workflow_path(graph, workflow_path)
             if validation.get("valid") is not True:
@@ -372,7 +366,7 @@ class ComfyMcpClient:
             {"workflow_path": str(workflow_path)},
         )
         if payload.get("valid") is not True:
-            repaired = _repair_save_video_dynamic_codec(
+            repaired = _repair_graph_for_validation(
                 graph,
                 payload.get("errors") or [],
             )
@@ -389,6 +383,7 @@ class ComfyMcpClient:
 
     async def validate_workflow(self, graph: dict[str, Any]) -> dict[str, Any]:
         """Ask Comfy MCP to validate a graph without queueing it."""
+        graph = apply_known_required_defaults(graph)
         with self._temporary_workflow(graph) as path:
             payload = await self._validate_workflow_path(graph, path)
         if payload.get("valid") is not True:

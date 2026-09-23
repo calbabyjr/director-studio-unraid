@@ -65,6 +65,7 @@ from .tool_schema import (
     GPT_REF_FRAME_TOOL,
     IMAGE_TOOLS as _IMAGE_TOOLS,
     PLAN_TOOLS as _PLAN_TOOLS,
+    SCRIPT_DRAFT_TOOLS as _SCRIPT_DRAFT_TOOLS,
     SCRIPT_TOOLS as _SCRIPT_TOOLS,
     STORYBOARD_TOOLS as _STORYBOARD_TOOLS,
     director_chat_guides as _director_chat_guides,
@@ -319,6 +320,7 @@ class ChatResult:
     images: list[ChatImage] = field(default_factory=list)
     thinking: str = ""
     steps: list[str] = field(default_factory=list)
+    choices: list = field(default_factory=list)
 
 
 class GptToolError(ValueError):
@@ -385,11 +387,21 @@ def _claims_storyboard_resubmission(content: str) -> bool:
 
 
 _CLAIMS_PENDING_TOOL = re.compile(
+    r"(?:"
     r"(?:i(?:['’]ll| will)|let me|going to|i(?:['’]m going to))\s+"
     r"(?:now\s+)?(?:call|use|run|invoke)\s+"
     r"(write_prompt|append_shot|save_storyboard|revise_shot|"
-    r"set_shot_scene_ref|patch_shot_refs|queue_\w+)",
-    re.I,
+    r"set_shot_scene_ref|patch_shot_refs|queue_\w+)"
+    r"|"
+    r"\bstarting now\b"
+    r"|"
+    r"(?:i(?:['’]ll| will)|let me)\s+(?:proceed|run through|start(?:ing)?(?: with)?|begin)"
+    r"|"
+    r"(?:first|next)\s*[:.—-]\s*write(?: the)? h3 prompt"
+    r"|"
+    r"write(?: the)? h3 prompt for"
+    r")",
+    re.I | re.S,
 )
 _PENDING_TOOL_CONTINUATION = (
     "You described a tool in prose and did not emit a native tool call. "
@@ -400,6 +412,22 @@ _PENDING_TOOL_CONTINUATION = (
 
 def _claims_pending_tool(content: str) -> bool:
     return bool(_CLAIMS_PENDING_TOOL.search(content or ""))
+
+
+def pending_tool_continuation(content: str = "") -> str:
+    text = content or ""
+    if re.search(r"h3 prompt|write_prompt|picture review", text, re.I):
+        return (
+            "You described the next production action in prose and did not emit a native tool call. "
+            "Call write_prompt now for the first Shot you named, using its exact shot_id from PROJECT_STATE. "
+            "Do not repeat the plan or wait for another user message."
+        )
+    if re.search(r"queue(?:ing)? generation|queue_h3", text, re.I):
+        return (
+            "You described the next production action in prose and did not emit a native tool call. "
+            "Call queue_h3 or write_prompt now. Do not repeat the plan."
+        )
+    return _PENDING_TOOL_CONTINUATION
 
 
 def _claims_completed_storyboard(content: str) -> bool:
@@ -493,6 +521,8 @@ Communication:
 - Reply in English, naturally and concisely, like a production colleague.
 - For questions about the project, answer only. Do not call set_script or mutate state.
 - When project state must change, use the provided native tools. Never print tool JSON in the response or claim work completed before a tool succeeds.
+- When the user asks to continue, proceed, work through open or outstanding tasks, or start the next item, call the first required mutating tool in this same turn (usually write_prompt). A checklist, "Starting now", or "I'll proceed" is not work.
+- When you need a decision with a small set of options, call ask_choices so the user can tick checkboxes. Do not dump a numbered quiz in prose.
 - You are responsible for asset casting. Never invent an asset ID that is absent from the library inventory.
 - Library inventory is metadata, not proof you saw an image. Use inspect_asset with an exact asset_id and file_key to read candidate images before casting when appearance is unknown or labels are unreliable. Inspect enough to answer the question, not every Library file by default; reuse those observations and do not claim visual inspection without a successful result. Names can identify fictional characters without describing appearance. Ask a focused question when a real conflict affects the user's intended story or casting. If explicit requirements conflict, ask which requirement takes priority; include retaining existing assets and adapting the story as an option instead of assuming replacement or generation. Use reasonable creative judgment for unspecified minor details.
 - When the user uploads images, classify every Image in the same turn from both its visible contents and the user's message. Use classify_chat_image once per Image before other state changes. Supply a concise name in the user's language and factual notes covering visible appearance and intended production use. Use chat_only when the classification is genuinely uncertain.
@@ -503,7 +533,8 @@ Communication:
 - TASKS.md is open work. Keep unfinished follow-ups as `- [ ]`. A 30-minute memory check rereads TASKS.md and MEMORY.md and reminds the production when items remain; it does not queue generation.
 
 Recommended pipeline; use judgment to decide when to advance:
-1) set_script — save a new or revised story supplied by the user. A premise or one-line brief is not a supplied script: you may expand it freely as a model-authored draft in conversation, but do not call set_script until the user explicitly asks to save, use, or adopt that draft
+1) draft_screenplay — when the user has a premise, notes, or a short story to adapt (not finished Fountain pages), author scene headings, action, and spoken lines, save that screenplay as an unlocked draft, and STOP. Do not call save_storyboard, plan_shots, queue_ref_frame, or generate media until the user approves and lock_script
+   set_script — save finished pages the user supplied as-is. A premise is not finished pages
 2) review_asset_coverage — before first storyboarding or after a script change, inspect the script and available file_keys; recommend only useful missing actor angles, scene angles/zones, props, costumes, or future Layout states. Explain why each would help. This is advisory: the user may skip it, and storyboard tools remain available.
 3) revise_shot — for an authored-field change to exactly one Shot, update only the supplied fields and preserve all other Shots, refs, voices, and Layouts. If the same request also asks for a rewritten production prompt, call revise_shot then write_prompt
    append_shot — when the user asks to add one Shot at the end, submit ONLY the new Shot with expected_script_hash=PROJECT_STATE.script_hash and expected_last_shot_id=PROJECT_STATE.last_shot_id. Python assigns its ID. Never rewrite the script or resubmit existing Shots for this request, even when the old plan is stale. On tail mismatch inspect current state; do not blindly retry with a refreshed tail.
@@ -540,7 +571,9 @@ Recommended pipeline; use judgment to decide when to advance:
     assemble_sequence — only when the user asks to stitch succeeded clips into a rough cut; skipped Shots are reported, not invented
 
 Tools (name + args):
-- set_script  {"script":"..."}  // only when the user supplies or changes story content; a question is not set_script
+- draft_screenplay  {"script":"...","premise":"...","notes":"...","source_excerpt":"..."}  // author Fountain from a premise; save draft and stop
+- set_script  {"script":"..."}  // only when the user supplies finished pages; a question is not set_script
+- lock_script  {}  // after the user explicitly approves the draft; then shot planning may begin on a later turn
 - review_asset_coverage  {"expected_script_hash":"...","status":"reviewed|skipped","recommendations":[],"notes":"..."}
 - save_storyboard  {"expected_script_hash":"...","shots":[complete ShotDraft objects]}  // preserve PROJECT_STATE Shot ids in shot_id; omit only for new Shots
 - revise_shot  {"shot_id":"...","script_beat":"..."}  // partial authored fields for exactly one Shot; follow with write_prompt when requested
@@ -570,7 +603,9 @@ Vision: the system may attach Image 1…N when the user asks you to inspect refe
 Tool-call rules:
 1) Use native tool calls for state changes; do not disguise them as natural language or Markdown JSON.
 2) Tool results are returned to you. Only then briefly explain what actually completed.
-3) Do not call tools for a question that only needs an answer."""
+3) Do not call tools for a question that only needs an answer.
+4) After you name the next production action, emit that native tool call in the same response. Prose plans without a tool call are incomplete.
+5) ask_choices  {"questions":[{"prompt":"...","options":["A","B"],"allow_multiple":true}]}  // checkbox questions; wait for the reply"""
 
 
 def _filter_tools_to_offered_schemas(
@@ -690,6 +725,7 @@ def sanitize_tools_for_pipeline(
     }:
         return tools, notes
     has_set = any(n in _SCRIPT_TOOLS for n in names)
+    has_draft = any(n in _SCRIPT_DRAFT_TOOLS for n in names)
     has_plan = any(n in _PLAN_TOOLS or n in _STORYBOARD_TOOLS or n == "append_shot" for n in names)
     has_image = any(n in _IMAGE_TOOLS for n in names)
 
@@ -700,8 +736,12 @@ def sanitize_tools_for_pipeline(
     shots_stale = bool(shots) and bool(script) and (
         not planned_hash or planned_hash != script_hash
     )
-    # set_script this turn / empty or stale shots → must plan before imaging
-    needs_plan = has_set or (bool(script) and (not shots or shots_stale))
+    draft_gate = has_draft or bool(project.script_draft_pending)
+    # set_script this turn / empty or stale shots → must plan before imaging.
+    # A model-authored draft must stop before planning.
+    needs_plan = (not draft_gate) and (
+        has_set or (bool(script) and (not shots or shots_stale))
+    )
 
     out: list[dict[str, Any]] = []
     for item in tools:
@@ -709,6 +749,16 @@ def sanitize_tools_for_pipeline(
             continue
         n = _tool_name(item)
         if not n:
+            continue
+        if draft_gate and n in (
+            _PLAN_TOOLS
+            | _STORYBOARD_TOOLS
+            | _IMAGE_TOOLS
+            | {"append_shot", "queue_h3", "assemble_sequence", "review_sequence"}
+        ):
+            notes.append(
+                f"Skipped {n}: screenplay draft is pending approval; lock_script before planning or generating."
+            )
             continue
         # Drop imaging tools when we still need a fresh plan
         if needs_plan and n in _IMAGE_TOOLS:
@@ -720,10 +770,17 @@ def sanitize_tools_for_pipeline(
 
     names2 = [_tool_name(t) for t in out]
     has_set = any(n in _SCRIPT_TOOLS for n in names2)
+    has_draft = any(n in _SCRIPT_DRAFT_TOOLS for n in names2)
     has_plan = any(n in _PLAN_TOOLS or n in _STORYBOARD_TOOLS or n == "append_shot" for n in names2)
+    draft_gate = has_draft or bool(project.script_draft_pending)
 
-    # After set_script or stale/missing shots, ensure plan_shots runs this turn
-    must_inject_plan = (has_set or shots_stale or (bool(script) and not shots)) and not has_plan
+    # After set_script or stale/missing shots, ensure plan_shots runs this turn.
+    # Never inject planning after a screenplay draft; that waits for lock_script.
+    must_inject_plan = (
+        not draft_gate
+        and (has_set or shots_stale or (bool(script) and not shots))
+        and not has_plan
+    )
     if must_inject_plan:
         plan_item: dict[str, Any] = {"name": "plan_shots", "args": {}}
         if has_set:
@@ -1230,6 +1287,7 @@ async def orchestrate_chat(
     attached_images: list[ChatImage] = []
     thinking_parts: list[str] = []
     steps: list[str] = []
+    pending_choices: list = []
     storyboard_save_attempted = False
     storyboard_save_blocked = False
 
@@ -1321,6 +1379,7 @@ async def orchestrate_chat(
             images=imgs,
             thinking=all_think.strip(),
             steps=list(steps),
+            choices=list(pending_choices),
         )
 
     # --- Fast path: short commands / pasted script ---
@@ -1558,7 +1617,7 @@ async def orchestrate_chat(
                                 "content": (
                                     _STORYBOARD_CONTINUATION_PROMPT
                                     if should_force_storyboard_continuation
-                                    else _PENDING_TOOL_CONTINUATION
+                                    else pending_tool_continuation(native_content)
                                 ),
                             }
                         )
@@ -1690,6 +1749,8 @@ async def orchestrate_chat(
                 }
                 for structured_result in structured_results:
                     tool_payload.update(structured_result)
+                    if structured_result.get("choices"):
+                        pending_choices = list(structured_result["choices"])
                 if tool["name"] == "save_storyboard":
                     storyboard_retry_pending = (
                         tool_payload.get("ok") is False

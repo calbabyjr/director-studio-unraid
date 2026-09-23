@@ -6,18 +6,24 @@ import { AssetDetailDialog } from "./AssetDetailDialog";
 import {
   addActorVoiceSample,
   addLibraryAssetFile,
+  deleteLibraryAssetFile,
+  getActorJob,
+  getLibraryAsset,
   listActorTakes,
   pinActorTake,
   updateActorSheet,
+  updateLibraryAsset,
   type LibraryAsset,
 } from "./api";
 
 vi.mock("./api", () => ({
   addLibraryAssetFile: vi.fn(),
+  deleteLibraryAssetFile: vi.fn(),
   addActorVoiceSample: vi.fn(),
   listActorTakes: vi.fn(async () => ({ items: [] })),
   pinActorTake: vi.fn(),
   updateActorSheet: vi.fn(),
+  updateLibraryAsset: vi.fn(),
   getActorJob: vi.fn(async () => ({ id: "job_sheet", status: "queued", error: null })),
   getLibraryAsset: vi.fn(),
 }));
@@ -38,7 +44,13 @@ const actor: LibraryAsset = {
 };
 
 describe("AssetDetailDialog actor voice samples", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.mocked(window.confirm)?.mockRestore?.();
+    vi.mocked(getActorJob).mockResolvedValue({ id: "job_sheet", status: "queued", error: null });
+    vi.mocked(listActorTakes).mockResolvedValue({ items: [] });
+  });
 
   it("uploads a voice sample onto the actor", async () => {
     vi.mocked(addActorVoiceSample).mockResolvedValue({
@@ -97,8 +109,116 @@ describe("AssetDetailDialog actor voice samples", () => {
     });
     render(<AssetDetailDialog asset={actor} onClose={() => undefined} />);
     fireEvent.click(screen.getByRole("button", { name: "Update asset sheet" }));
-    await waitFor(() => expect(updateActorSheet).toHaveBeenCalledWith("act_jenny"));
+    await waitFor(() => expect(updateActorSheet).toHaveBeenCalledWith("act_jenny", { dress_state: "unclothed" }));
     expect(screen.getByText(/Sheet job queued/)).toBeTruthy();
+  });
+
+  it("keeps actor image and sheet actions on two toolbar rows", () => {
+    const { container } = render(<AssetDetailDialog asset={actor} onClose={() => undefined} />);
+    const imageRow = container.querySelector(".folder-add-image:not(.folder-actor-sheet-actions)");
+    const sheetRow = container.querySelector(".folder-actor-sheet-actions");
+    expect(imageRow).toBeTruthy();
+    expect(sheetRow).toBeTruthy();
+    expect(imageRow?.contains(screen.getByRole("button", { name: "Add image" }))).toBe(true);
+    expect(sheetRow?.contains(screen.getByRole("button", { name: "Update asset sheet" }))).toBe(true);
+    expect(sheetRow?.contains(screen.getByRole("button", { name: "Add voice sample" }))).toBe(true);
+    expect((screen.getByLabelText("Body") as HTMLSelectElement).value).toBe("unclothed");
+  });
+
+  it("adds an extra identity still onto the actor folder", async () => {
+    vi.mocked(addLibraryAssetFile).mockResolvedValue({
+      ...actor,
+      files: { master: "master.png", profile: "profile.png" },
+      urls: {
+        master: "/api/files/library/actors/act_jenny/master.png",
+        profile: "/api/files/library/actors/act_jenny/profile.png",
+      },
+    });
+    const onUpdated = vi.fn();
+    render(<AssetDetailDialog asset={actor} onClose={() => undefined} onUpdated={onUpdated} />);
+
+    fireEvent.change(screen.getByLabelText("New actor view"), { target: { value: "profile" } });
+    fireEvent.change(screen.getByLabelText("Actor view file"), {
+      target: { files: [new File(["jpg"], "profile.jpg", { type: "image/jpeg" })] },
+    });
+
+    await waitFor(() => expect(addLibraryAssetFile).toHaveBeenCalledOnce());
+    expect(addLibraryAssetFile).toHaveBeenCalledWith(
+      "actors",
+      "act_jenny",
+      expect.any(File),
+      "profile",
+    );
+    expect(onUpdated).toHaveBeenCalled();
+    expect(screen.getByRole("img", { name: "Profile" })).toBeTruthy();
+  });
+
+  it("deletes a clothed identity JPEG from the actor folder", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const withFace: LibraryAsset = {
+      ...actor,
+      files: { master: "master.png", face: "face.jpg" },
+      urls: {
+        master: "/api/files/library/actors/act_jenny/master.png",
+        face: "/api/files/library/actors/act_jenny/face.jpg",
+      },
+    };
+    vi.mocked(deleteLibraryAssetFile).mockResolvedValue({
+      ...actor,
+      files: { master: "master.png" },
+      urls: { master: "/api/files/library/actors/act_jenny/master.png" },
+    });
+    const onUpdated = vi.fn();
+    render(<AssetDetailDialog asset={withFace} onClose={() => undefined} onUpdated={onUpdated} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Face" }));
+    await waitFor(() => expect(deleteLibraryAssetFile).toHaveBeenCalledWith("actors", "act_jenny", "face"));
+    expect(window.confirm).toHaveBeenCalled();
+    expect(onUpdated).toHaveBeenCalled();
+    expect(screen.queryByRole("img", { name: "Face" })).toBeNull();
+    expect(screen.getByRole("img", { name: "Master" })).toBeTruthy();
+  });
+
+  it("persists a clothed body choice from the actor folder", async () => {
+    vi.mocked(updateLibraryAsset).mockResolvedValue({
+      ...actor,
+      meta: { dress_state: "clothed" },
+    });
+    const onUpdated = vi.fn();
+    render(<AssetDetailDialog asset={actor} onClose={() => undefined} onUpdated={onUpdated} />);
+    fireEvent.change(screen.getByLabelText("Body"), { target: { value: "clothed" } });
+    await waitFor(() => expect(updateLibraryAsset).toHaveBeenCalledWith(
+      "actors",
+      "act_jenny",
+      { dress_state: "clothed" },
+    ));
+    expect(onUpdated).toHaveBeenCalled();
+  });
+
+  it("refreshes folder files after an asset-sheet job succeeds", async () => {
+    vi.mocked(updateActorSheet).mockResolvedValue({
+      id: "job_sheet",
+      status: "queued",
+      error: null,
+    });
+    vi.mocked(getLibraryAsset).mockResolvedValue({
+      ...actor,
+      files: { master: "master.png", fullbody_threeview: "full.png" },
+      urls: {
+        master: "/api/files/library/actors/act_jenny/master.png",
+        fullbody_threeview: "/api/files/library/actors/act_jenny/full.png",
+      },
+    });
+    vi.mocked(getActorJob).mockResolvedValue({
+      id: "job_sheet",
+      status: "succeeded",
+      error: null,
+    });
+    const onUpdated = vi.fn();
+    render(<AssetDetailDialog asset={actor} onClose={() => undefined} onUpdated={onUpdated} />);
+    fireEvent.click(screen.getByRole("button", { name: "Update asset sheet" }));
+    await waitFor(() => expect(getLibraryAsset).toHaveBeenCalledWith("actors", "act_jenny"));
+    expect(onUpdated).toHaveBeenCalled();
+    expect(screen.getByText("Full-body three-view")).toBeTruthy();
   });
 
   it("does not offer voice samples on a Voice asset", () => {
@@ -151,6 +271,18 @@ describe("AssetDetailDialog actor takes", () => {
       expect(pinActorTake).toHaveBeenCalledWith("act_jenny", "actjob_1");
     });
     expect(onUpdated).toHaveBeenCalled();
+  });
+
+  it("renders the file grid before the takes list", async () => {
+    vi.mocked(listActorTakes).mockResolvedValue({
+      items: [
+        { id: "actjob_1", status: "succeeded", created_at: "2026-01-01T00:00:00Z", pinned: false },
+      ],
+    });
+    render(<AssetDetailDialog asset={actor} onClose={() => undefined} />);
+    const master = await screen.findByText("Master");
+    const takes = screen.getByLabelText("Actor takes");
+    expect(master.compareDocumentPosition(takes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("does not show actor takes on a Voice asset", () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   addDirectorMemoryNote,
   deleteDirectorMemoryNote,
@@ -6,9 +6,10 @@ import {
   type DirectorMemoryNote,
 } from "./api";
 
-export function MemoryNotes({ projectId, disabled = false }: {
+export function MemoryNotes({ projectId, disabled = false, children }: {
   projectId: string;
   disabled?: boolean;
+  children?: ReactNode;
 }) {
   const [notes, setNotes] = useState<DirectorMemoryNote[]>([]);
   const [draft, setDraft] = useState("");
@@ -68,6 +69,7 @@ export function MemoryNotes({ projectId, disabled = false }: {
         Permanent memory
         <span>{notes.length}</span>
       </summary>
+      {children}
       <p className="director-memory-hint">
         These survive new sessions and are compiled into Director MEMORY.md after every turn. Correct the Director once; it should not repeat the same mistake.
       </p>

@@ -9,10 +9,13 @@ from ...config import settings
 from ...core.projects.models import AssetCoverageReviewSubmission, Project
 from .intent import (
     actor_design_intent,
+    ask_choices_intent,
     assemble_sequence_intent,
+    draft_screenplay_intent,
     explicit_gpt_image_intent,
     explicit_h3_generation_intent,
     explicit_layout_generation_intent,
+    lock_script_intent,
     material_review_target_shot_id,
     prop_design_intent,
     sequence_review_intent,
@@ -45,6 +48,8 @@ IMAGE_TOOLS = frozenset(
 PLAN_TOOLS = frozenset({"plan_shots", "plan"})
 STORYBOARD_TOOLS = frozenset({"save_storyboard"})
 SCRIPT_TOOLS = frozenset({"set_script"})
+SCRIPT_DRAFT_TOOLS = frozenset({"draft_screenplay"})
+SCRIPT_LOCK_TOOLS = frozenset({"lock_script"})
 
 
 def function_tool(
@@ -297,16 +302,92 @@ CHAT_IMAGE_CLASSIFICATION_TOOL = function_tool(
     required=["image_index", "kind", "name", "notes", "confidence"],
 )
 
+ASK_CHOICES_TOOL = function_tool(
+    "ask_choices",
+    (
+        "Ask the user one or more multiple-choice questions as checkboxes. "
+        "Use this instead of writing a quiz in prose when they can pick from options. "
+        "Wait for their reply; do not assume answers."
+    ),
+    {
+        "questions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 400,
+                        "description": "The question shown above the checkboxes.",
+                    },
+                    "options": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 8,
+                        "items": {"type": "string", "minLength": 1, "maxLength": 160},
+                    },
+                    "allow_multiple": {
+                        "type": "boolean",
+                        "description": "True if they may tick more than one box.",
+                    },
+                },
+                "required": ["prompt", "options"],
+            },
+        }
+    },
+    required=["questions"],
+)
+
 DIRECTOR_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    ASK_CHOICES_TOOL,
     ACTOR_DESIGN_TOOL,
     ACTOR_ACCEPT_TOOL,
     PROP_DESIGN_TOOL,
     PROP_ACCEPT_TOOL,
     function_tool(
         "set_script",
-        "Save a new or revised screenplay supplied by the user.",
+        "Save finished screenplay pages the user supplied as-is. Do not use this to expand a premise.",
         {"script": {"type": "string", "minLength": 1}},
         required=["script"],
+    ),
+    function_tool(
+        "draft_screenplay",
+        (
+            "Author a Fountain screenplay from a premise, notes, or source story: "
+            "scene headings, action, and spoken lines. Save it as an unlocked draft "
+            "and stop. Do not plan shots, cast, or generate video in the same turn."
+        ),
+        {
+            "premise": {
+                "type": "string",
+                "description": "The user's idea, logline, or brief.",
+            },
+            "notes": {
+                "type": "string",
+                "description": "Optional constraints: tone, characters, length, adult/NSFW, setting.",
+            },
+            "source_excerpt": {
+                "type": "string",
+                "description": "Optional pasted or uploaded story to adapt, not a whole novel.",
+            },
+            "script": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The authored Fountain screenplay to save as the draft.",
+            },
+        },
+        required=["script"],
+    ),
+    function_tool(
+        "lock_script",
+        (
+            "Lock the current screenplay as the source of truth after the user "
+            "explicitly approves the draft. Shot planning may follow on a later turn."
+        ),
     ),
     {
         "type": "function",
@@ -623,6 +704,24 @@ def director_tool_schemas(
 ) -> list[dict[str, Any]]:
     if include_chat_image_import:
         return [CHAT_IMAGE_CLASSIFICATION_TOOL]
+    if ask_choices_intent(current_message):
+        return [ASK_CHOICES_TOOL]
+    if draft_screenplay_intent(current_message) and not project.script_locked:
+        return [
+            tool
+            for tool in DIRECTOR_TOOL_SCHEMAS
+            if tool["function"]["name"] == "draft_screenplay"
+        ]
+    if (
+        lock_script_intent(current_message)
+        and (project.script_text or "").strip()
+        and not project.script_locked
+    ):
+        return [
+            tool
+            for tool in DIRECTOR_TOOL_SCHEMAS
+            if tool["function"]["name"] in {"lock_script", "set_script", "get_status"}
+        ]
     if actor_design_intent(current_message) and prop_design_intent(current_message):
         return [ACTOR_DESIGN_TOOL, PROP_DESIGN_TOOL]
     if actor_design_intent(current_message):
@@ -656,6 +755,29 @@ def director_tool_schemas(
     excluded = set()
     if project.script_locked:
         excluded.update(SCRIPT_TOOLS)
+        excluded.update(SCRIPT_DRAFT_TOOLS)
+        excluded.update(SCRIPT_LOCK_TOOLS)
+    draft_gate = bool(
+        project.script_draft_pending or not (project.script_text or "").strip()
+    )
+    if draft_gate:
+        excluded.update(PLAN_TOOLS)
+        excluded.update(STORYBOARD_TOOLS)
+        excluded.update(IMAGE_TOOLS)
+        excluded.update(
+            {
+                "queue_h3",
+                "assemble_sequence",
+                "review_sequence",
+                "append_shot",
+                "queue_actor_design",
+                "accept_actor_design",
+                "queue_prop_design",
+                "accept_prop_design",
+            }
+        )
+    if not project.script_draft_pending or not (project.script_text or "").strip():
+        excluded.update(SCRIPT_LOCK_TOOLS)
     if not allow_save_storyboard:
         excluded.update(STORYBOARD_TOOLS)
     if not layout_generation_authorized:
@@ -692,6 +814,7 @@ def director_tool_schemas(
             "queue_h3",
             "get_status",
             "inspect_asset",
+            "ask_choices",
             "remember_note",
             "forget_note",
             "improve_soul",

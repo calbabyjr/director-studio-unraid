@@ -864,6 +864,109 @@ async def test_max_steps_returns_a_normal_unconfirmed_outcome(
     assert "not confirmed" in result.reply.lower()
 
 
+def test_bounded_harness_history_keeps_recent_turns():
+    from app.agents.director.harness_runtime import bounded_harness_history
+
+    rows = [{"role": "user", "content": f"archive-{i} " + ("x" * 400)} for i in range(20)]
+    rows.append({"role": "assistant", "content": "latest-ack"})
+    kept = bounded_harness_history(rows, budget_tokens=200)
+    contents = [row["content"] for row in kept]
+    assert any("omitted" in text for text in contents)
+    assert contents[-1] == "latest-ack"
+    assert not any(text.startswith("archive-0 ") for text in contents)
+
+
+@pytest.mark.asyncio
+async def test_chat_retries_fresh_session_after_compaction_failure(
+    tmp_projects_dir,
+    monkeypatch,
+):
+    from app.agents.director import harness_runtime
+    from app.agents.director.harness_client import HarnessError
+
+    project = create_project("compaction overflow", "")
+    calls = []
+    notices = []
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def run(self, body, dispatch, on_progress):
+            calls.append(body)
+            if len(calls) == 1:
+                raise HarnessError(
+                    "Harness COMPACTION_FAILED: summarization truncated at the token cap (incomplete checkpoint). Original history is preserved.",
+                    code="COMPACTION_FAILED",
+                )
+            return {"reply": "continuing", "thinking": ""}
+
+    async def on_progress(event):
+        notices.append(event)
+
+    monkeypatch.setattr(harness_runtime, "HarnessClient", Client)
+    history = (
+        [{"role": "user", "content": f"old-{i} " + ("detail " * 40)} for i in range(30)]
+        + [{"role": "assistant", "content": "recent-ack"}]
+    )
+    result = await harness_runtime.handle_harness_chat(
+        project_id=project.id,
+        message="Continue",
+        svc=None,
+        chat_fn=None,
+        history=history,
+        on_progress=on_progress,
+        context_capacity=32_000,
+    )
+
+    assert result.reply == "continuing"
+    assert len(calls) == 2
+    assert calls[0]["history"] == []
+    assert calls[0]["session_id"] != calls[1]["session_id"]
+    assert calls[1]["history"]
+    assert any("recent-ack" in row["content"] for row in calls[1]["history"])
+    assert any("recent turns" in str(event.get("text") or "") for event in notices)
+
+
+@pytest.mark.asyncio
+async def test_chat_falls_back_to_empty_history_when_retry_still_cannot_compact(
+    tmp_projects_dir,
+    monkeypatch,
+):
+    from app.agents.director import harness_runtime
+    from app.agents.director.harness_client import HarnessError
+
+    project = create_project("compaction twice", "")
+    calls = []
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def run(self, body, dispatch, on_progress):
+            calls.append(body)
+            if len(calls) < 3:
+                raise HarnessError(
+                    "Harness COMPACTION_FAILED: summary is not smaller than the shadowed content (1159 estimated framed tokens >= 1159). Original history is preserved.",
+                    code="COMPACTION_FAILED",
+                )
+            return {"reply": "fresh", "thinking": ""}
+
+    monkeypatch.setattr(harness_runtime, "HarnessClient", Client)
+    result = await harness_runtime.handle_harness_chat(
+        project_id=project.id,
+        message="Continue",
+        svc=None,
+        chat_fn=None,
+        history=[{"role": "user", "content": "prior"}, {"role": "assistant", "content": "ack"}],
+        context_capacity=32_000,
+    )
+    assert result.reply == "fresh"
+    assert len(calls) == 3
+    assert calls[2]["history"] == []
+    assert calls[2]["session_id"] != calls[0]["session_id"]
+
+
 @pytest.mark.asyncio
 async def test_backend_llm_uses_authoritative_context_and_keeps_images_local(tmp_projects_dir):
     from app.agents.director.harness_runtime import BackendTurn
@@ -887,6 +990,61 @@ async def test_backend_llm_uses_authoritative_context_and_keeps_images_local(tmp
     await turn.dispatch("llm", {"messages": [{"role": "user", "content": "summarize history"}], "purpose": "compaction"})
     assert captured[-1][1]["tools"] == []
     assert all("images" not in m for m in captured[-1][1]["messages"])
+
+
+@pytest.mark.asyncio
+async def test_harness_retries_plan_only_reply_into_a_tool_call(tmp_projects_dir):
+    from app.agents.director.harness_runtime import BackendTurn
+
+    project = create_project("execute the plan", "A cat waits.")
+    calls = []
+
+    async def inference(system, user, **kwargs):
+        calls.append(kwargs["messages"])
+        if len(calls) == 1:
+            return {
+                "content": (
+                    "Starting now:\nI'll proceed shot by shot. "
+                    "First: write the H3 prompt for Establish the Space."
+                ),
+                "tool_calls": [],
+            }
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_write",
+                    "type": "function",
+                    "function": {
+                        "name": "write_prompt",
+                        "arguments": {"shot_id": "sht_space"},
+                    },
+                }
+            ],
+        }
+
+    turn = BackendTurn(project.id, "continue with all open tasks", None, inference)
+    ctx = await turn.dispatch("context", {})
+    system = ctx["system"] + "\n\nPROJECT_STATE:\n" + ctx["state"]
+    schemas = [
+        {
+            "name": tool["function"]["name"],
+            "description": tool["function"].get("description", ""),
+            "parameters": tool["function"].get("parameters") or {"type": "object"},
+        }
+        for tool in ctx["tools"]
+    ]
+    result = await turn.infer(
+        {
+            "system": system,
+            "tools": schemas,
+            "purpose": "turn",
+            "messages": [{"role": "user", "content": "continue with all open tasks"}],
+        }
+    )
+    assert len(calls) == 2
+    assert "write_prompt" in calls[1][-1]["content"]
+    assert result["tool_calls"][0]["function"]["name"] == "write_prompt"
 
 
 @pytest.mark.asyncio

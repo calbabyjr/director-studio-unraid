@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SetDesignPage } from "./SetDesignPage";
-import { fetchSceneDefaults, generateScene, listSceneJobs } from "./api";
+import { fetchSceneDefaults, generateScene, getSceneJob, listSceneJobs } from "./api";
 import type { SceneJobRecord } from "./api";
 
 const projectState = vi.hoisted(() => ({
@@ -46,7 +46,10 @@ const finishedSceneJob: SceneJobRecord = {
 };
 
 describe("SetDesignPage", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -202,5 +205,34 @@ describe("SetDesignPage", () => {
     expect((screen.getByLabelText(/Name/) as HTMLInputElement).value).toBe("");
     expect(screen.queryByText("scenejob_old")).toBeNull();
     expect(screen.getByText("Idle")).toBeTruthy();
+  });
+
+  it("does not fetch defaults or jobs while the category is hidden", async () => {
+    render(<SetDesignPage active={false} onOpenLibrary={() => undefined} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchSceneDefaults).not.toHaveBeenCalled();
+    expect(listSceneJobs).not.toHaveBeenCalled();
+  });
+
+  it("does not poll an in-flight scene job while the category is hidden", async () => {
+    const running: SceneJobRecord = { ...finishedSceneJob, id: "scenejob_run", status: "running", name: "Hall" };
+    vi.mocked(listSceneJobs).mockResolvedValue([running]);
+    vi.mocked(getSceneJob).mockResolvedValue(running);
+
+    const { rerender } = render(<SetDesignPage onOpenLibrary={() => undefined} />);
+    expect(await screen.findByText(/Generating .* angles/)).toBeTruthy();
+
+    vi.useFakeTimers();
+    rerender(<SetDesignPage active={false} onOpenLibrary={() => undefined} />);
+    vi.mocked(getSceneJob).mockClear();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getSceneJob).not.toHaveBeenCalled();
   });
 });

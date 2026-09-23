@@ -21,11 +21,19 @@ import {
 
 const ACTIVE: JobStatus[] = ["queued", "uploading", "running"];
 
+const EXTRA_VIEW_SLOTS = [
+  { key: "face", field: "face_image", saveKey: "face", label: "Face" },
+  { key: "profile", field: "profile_image", saveKey: "profile", label: "Profile" },
+  { key: "back", field: "back_image", saveKey: "back", label: "Back" },
+  { key: "threeview_extra", field: "extra_threeview_image", saveKey: "threeview_extra", label: "Extra three-view" },
+] as const;
+
 interface Props {
   onOpenLibrary: () => void;
+  active?: boolean;
 }
 
-export function CastingPage({ onOpenLibrary }: Props) {
+export function CastingPage({ onOpenLibrary, active = true }: Props) {
   const { projectId } = useProject();
 
   const [defaults, setDefaults] = useState<MetaDefaults | null>(null);
@@ -42,6 +50,7 @@ export function CastingPage({ onOpenLibrary }: Props) {
   const [voiceSample, setVoiceSample] = useState<File | null>(null);
   const [includeHeadwear, setIncludeHeadwear] = useState(false);
   const [includeFootwear, setIncludeFootwear] = useState(false);
+  const [dressState, setDressState] = useState<"unclothed" | "clothed">("unclothed");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [job, setJob] = useState<JobRecord | null>(null);
@@ -50,6 +59,7 @@ export function CastingPage({ onOpenLibrary }: Props) {
   const [lightbox, setLightbox] = useState<{ slots: OutputSlot[]; index: number } | null>(null);
 
   useEffect(() => {
+    if (!active) return;
     fetchDefaults()
       .then((d) => {
         setDefaults(d);
@@ -57,7 +67,7 @@ export function CastingPage({ onOpenLibrary }: Props) {
         setNegative((prev) => prev || d.default_negative);
       })
       .catch((e) => setFormError(String(e)));
-  }, []);
+  }, [active]);
 
   // Project-scoped drafts must never leak into the next project. On a reload,
   // reconnect only to work that is still in progress.
@@ -75,37 +85,41 @@ export function CastingPage({ onOpenLibrary }: Props) {
     setVoiceSample(null);
     setIncludeHeadwear(false);
     setIncludeFootwear(false);
+    setDressState("unclothed");
     setFieldErrors({});
     setFormError(null);
     setJob(null);
     setBusy(false);
     setSavedActor(null);
     setLightbox(null);
-    if (!projectId) return;
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!active || !projectId) return;
     let cancelled = false;
     listActorJobs(projectId, 15)
       .then((jobs) => {
         if (cancelled) return;
-        const active = jobs.find((j) => ACTIVE.includes(j.status));
-        if (!active) return;
-        setJob(active);
-        if (active.name) setName(active.name);
+        const inFlight = jobs.find((j) => ACTIVE.includes(j.status));
+        if (!inFlight) return;
+        setJob(inFlight);
+        if (inFlight.name) setName(inFlight.name);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [active, projectId]);
 
   useEffect(() => {
-    if (!job || !ACTIVE.includes(job.status)) return;
+    if (!active || !job || !ACTIVE.includes(job.status)) return;
     const t = window.setInterval(() => {
       getJob(job.id)
         .then(setJob)
         .catch((e) => setFormError(String(e)));
     }, 1500);
     return () => window.clearInterval(t);
-  }, [job?.id, job?.status]);
+  }, [active, job?.id, job?.status]);
 
   const status: JobStatus | "idle" = job?.status || "idle";
   const isRunning = job ? ACTIVE.includes(job.status) : false;
@@ -144,12 +158,13 @@ export function CastingPage({ onOpenLibrary }: Props) {
       if (fixedSeed && seed.trim()) fd.set("seed", seed.trim());
       if (actorImg) fd.set("actor_image", actorImg.file, actorImg.file.name);
       if (wardrobeImg) fd.set("wardrobe_image", wardrobeImg.file, wardrobeImg.file.name);
-      const extraFields = ["face_image", "profile_image", "back_image", "extra_threeview_image"] as const;
-      extraViews.forEach((view, index) => {
-        if (view) fd.set(extraFields[index], view.file, view.file.name);
+      EXTRA_VIEW_SLOTS.forEach((slot, index) => {
+        const view = extraViews[index];
+        if (view) fd.set(slot.field, view.file, view.file.name);
       });
       fd.set("include_headwear", wardrobeImg && includeHeadwear ? "true" : "false");
       fd.set("include_footwear", wardrobeImg && includeFootwear ? "true" : "false");
+      fd.set("dress_state", dressState);
       setJob(await generateActor(fd));
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
@@ -180,15 +195,10 @@ export function CastingPage({ onOpenLibrary }: Props) {
         notes,
         project_id: projectId,
       });
-      const extraKeys = ["face", "profile", "back", "threeview_extra"] as const;
-      for (const [index, view] of extraViews.entries()) {
+      for (const [index, slot] of EXTRA_VIEW_SLOTS.entries()) {
+        const view = extraViews[index];
         if (!view) continue;
-        await addLibraryAssetFile(
-          "actors",
-          actor.id,
-          view.file,
-          extraKeys[index] || "extra",
-        );
+        await addLibraryAssetFile("actors", actor.id, view.file, slot.saveKey);
       }
       if (voiceSample) {
         await addActorVoiceSample(actor.id, voiceSample, {
@@ -213,6 +223,7 @@ export function CastingPage({ onOpenLibrary }: Props) {
     setVoiceSample(null);
     setIncludeHeadwear(false);
     setIncludeFootwear(false);
+    setDressState("unclothed");
     setFixedSeed(false);
     setSeed("");
     setFieldErrors({});
@@ -259,18 +270,35 @@ export function CastingPage({ onOpenLibrary }: Props) {
 
           <div className="block">
             <div className="block-title">Identity</div>
-            <label className="field">
-              <span>
-                Name <span className="req">*</span>
-              </span>
-              <input
-                value={name}
-                disabled={isRunning}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Lead_Female_A"
-              />
-              {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
-            </label>
+            <div className="upload-row two">
+              <label className="field">
+                <span>
+                  Name <span className="req">*</span>
+                </span>
+                <input
+                  value={name}
+                  disabled={isRunning}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Lead_Female_A"
+                />
+                {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
+              </label>
+              <label className="field">
+                <span>Body</span>
+                <select
+                  value={dressState}
+                  disabled={isRunning}
+                  aria-label="Body"
+                  onChange={(event) => setDressState(event.target.value as "unclothed" | "clothed")}
+                >
+                  <option value="unclothed">Unclothed / nude</option>
+                  <option value="clothed">Clothed</option>
+                </select>
+                <span className="field-hint">
+                  Unclothed keeps the body bare on the sheet. Clothed uses wardrobe or the described outfit.
+                </span>
+              </label>
+            </div>
             <label className="field">
               <span>Notes</span>
               <input
@@ -310,10 +338,10 @@ export function CastingPage({ onOpenLibrary }: Props) {
               Extra views (face, profile, back) go into the generated Asset Sheet as more identity photos of the same person, then stay on the saved actor so H3 can bind more Pictures.
             </p>
             <div className="upload-row extra-actor-views">
-              {[0, 1, 2, 3].map((index) => (
+              {EXTRA_VIEW_SLOTS.map((slot, index) => (
                 <ImageUploadSlot
-                  key={index}
-                  label={["Face", "Profile", "Back", "Extra three-view"][index]}
+                  key={slot.key}
+                  label={slot.label}
                   value={extraViews[index]}
                   disabled={isRunning}
                   onChange={(value) => {

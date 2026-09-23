@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...pipelines.actor.workflow import derive_mode
+from ...pipelines.actor.workflow import (
+    DRESS_CLOTHED,
+    DRESS_UNCLOTHED,
+    derive_mode,
+    dress_state_prompt,
+    normalize_dress_state,
+)
 from ..jobs import create_job, start_pipeline_job
 from ..paths import find_asset_dir
 from ..projects.takes import pin_actor_take
@@ -69,17 +75,28 @@ def pack_actor_sheet_images(actor: LibraryAsset) -> dict[str, tuple[str, bytes]]
     return images
 
 
-async def queue_actor_sheet_update(actor_id: str) -> JobRecord:
+async def queue_actor_sheet_update(
+    actor_id: str,
+    *,
+    dress_state: str | None = None,
+) -> JobRecord:
     actor = load_asset("actors", actor_id)
     if actor is None:
         raise ValueError(f"actor not found: {actor_id}")
+    dress = normalize_dress_state(
+        dress_state or (actor.meta or {}).get("dress_state") or DRESS_UNCLOTHED
+    )
     images = pack_actor_sheet_images(actor)
+    if dress != DRESS_CLOTHED:
+        images.pop("wardrobe", None)
     extras = [key for key in EXTRA_KEYS if key in images]
     has_actor = True
     has_wardrobe = "wardrobe" in images
     notes = (actor.notes or "").strip()
     description = " ".join(
-        part for part in (notes, PRESERVE_DRESS_DESCRIPTION) if part
+        part
+        for part in (notes, dress_state_prompt(dress), PRESERVE_DRESS_DESCRIPTION)
+        if part
     ).strip()
     job = create_job(
         pipeline_id="actor",
@@ -92,6 +109,7 @@ async def queue_actor_sheet_update(actor_id: str) -> JobRecord:
             "has_wardrobe_ref": has_wardrobe,
             "include_headwear": False,
             "include_footwear": False,
+            "dress_state": dress,
             "extra_ref_keys": extras,
             "mode": derive_mode(has_actor_ref=has_actor, has_wardrobe_ref=has_wardrobe),
             "update_asset_id": actor.id,
@@ -105,6 +123,7 @@ async def queue_actor_sheet_update(actor_id: str) -> JobRecord:
     save_job(job)
     meta = dict(actor.meta or {})
     meta["sheet_update_job_id"] = job.id
+    meta["dress_state"] = dress
     write_asset(actor.model_copy(update={"meta": meta}))
     return await start_pipeline_job(job, images=images)
 

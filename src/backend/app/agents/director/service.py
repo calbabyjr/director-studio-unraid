@@ -63,6 +63,7 @@ from .planner import (
     ShotRevisionSubmission,
     ShotDraft,
     parse_prompt_sections_json,
+    prompt_section_inventory_fallback,
     parse_shot_drafts,
     parse_storyboard_validation,
     role_to_library_kind,
@@ -2003,17 +2004,12 @@ class DirectorService:
 
             def parse_and_validate(value: str) -> PromptSections:
                 existing = shot.prompt_sections
-                fallback = {
-                    key: str(getattr(existing, key, "") or "")
-                    for key in (
-                        "subject_definitions",
-                        "summary",
-                        "retention_analysis",
-                        "detailed_description",
-                        "overall_soundscape",
-                        "non_diegetic_music",
-                    )
-                } if existing is not None else None
+                fallback = prompt_section_inventory_fallback(shot)
+                if existing is not None:
+                    for key in list(fallback):
+                        prior = str(getattr(existing, key, "") or "").strip()
+                        if prior:
+                            fallback[key] = prior
                 parsed = PromptSections(
                     **parse_prompt_sections_json(value, fallback=fallback)
                 )
@@ -2050,7 +2046,12 @@ class DirectorService:
                     repair,
                     guides=("h3-prompt-writing",),
                 )
-                prompt_sections = parse_and_validate(raw2)
+                try:
+                    prompt_sections = parse_and_validate(raw2)
+                except Exception:
+                    prompt_sections = parse_and_validate(
+                        json.dumps(prompt_section_inventory_fallback(shot))
+                    )
 
         check_current()
 

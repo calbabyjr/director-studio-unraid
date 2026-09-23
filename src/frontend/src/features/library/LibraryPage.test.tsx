@@ -172,6 +172,33 @@ describe("LibraryPage Voices", () => {
     expect(screen.queryByRole("dialog", { name: "Edit Mia metadata" })).toBeNull();
   });
 
+  it("keeps the asset folder open while the metadata editor is stacked on top", async () => {
+    vi.mocked(listLibraryAssets).mockImplementation(async (kind) =>
+      kind === "actors"
+        ? [{
+            id: "act_mia",
+            kind: "actors",
+            name: "Mia",
+            notes: "Lead",
+            pipeline_id: "actor",
+            job_id: "job_actor",
+            seed: 1,
+            created_at: "2026-08-25T00:00:00Z",
+            files: { master: "master.png" },
+            meta: {},
+            urls: { master: "/api/files/library/actors/act_mia/master.png" },
+            project_id: "prj_test",
+          }]
+        : [],
+    );
+    render(<LibraryPage />);
+    fireEvent.click(await screen.findByTitle("Open asset folder"));
+    expect(screen.getByRole("dialog", { name: "Mia assets" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("dialog", { name: "Edit Mia metadata" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Mia assets" })).toBeTruthy();
+  });
+
   it("closes the dialog and refreshes the category after import", async () => {
     vi.mocked(importExternalAsset).mockResolvedValue({} as never);
     render(<LibraryPage />);

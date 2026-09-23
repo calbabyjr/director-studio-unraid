@@ -129,7 +129,10 @@ function detail(currentShot: Shot): ProjectDetail {
 }
 
 describe("ProductionPage prompt refresh", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   beforeEach(() => {
     fetchH3ProfilesMock.mockResolvedValue({ active: { display_name: "My H3 Quality Profile", source: "custom", warning: null }, profiles: [] });
@@ -140,6 +143,23 @@ describe("ProductionPage prompt refresh", () => {
       default_provider: "local",
       minimax_configured: true,
       minimax_resolution: "768P",
+    });
+    vi.mocked(getH3Job).mockResolvedValue({
+      id: "job_default",
+      status: "succeeded",
+      name: "done",
+      notes: "",
+      prompt: "",
+      dialogue: [],
+      frames: 90,
+      error: null,
+      comfy_prompt_id: null,
+      external_task_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      outputs: {},
+      input_previews: {},
+      pipeline_id: "h3_ref2va",
     });
   });
 
@@ -165,11 +185,21 @@ describe("ProductionPage prompt refresh", () => {
     const completed = { ...shot(generatedPrompt), status: "succeeded", h3_job_id: "job_done" } as Shot;
     vi.mocked(getProject).mockResolvedValue(detail(completed));
 
+    vi.useFakeTimers();
     render(<ProductionPage active />);
-    await screen.findByText("Corridor walk-in");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getAllByText("Corridor walk-in").length).toBeGreaterThan(0);
     const initialCalls = vi.mocked(getProject).mock.calls.length;
 
-    await new Promise((resolve) => window.setTimeout(resolve, 3100));
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(getProject).toHaveBeenCalledTimes(initialCalls);
   });
 
@@ -183,10 +213,22 @@ describe("ProductionPage prompt refresh", () => {
       outputs: {}, input_previews: {}, pipeline_id: "h3_ref2va",
     });
 
+    vi.useFakeTimers();
     render(<ProductionPage active mobile />);
-    await waitFor(() => expect(getH3Job).toHaveBeenCalledWith("job_done"));
-    await new Promise((resolve) => window.setTimeout(resolve, 1600));
-    expect(getH3Job).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getH3Job).toHaveBeenCalledWith("job_done");
+    const initialJobCalls = vi.mocked(getH3Job).mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(1600);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getH3Job).toHaveBeenCalledTimes(initialJobCalls);
   });
 
   it("shows the mobile Shot design details on desktop Production", async () => {
@@ -201,7 +243,7 @@ describe("ProductionPage prompt refresh", () => {
     vi.mocked(getProject).mockResolvedValue(detail(planned));
 
     render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
 
     const design = await screen.findByRole("region", { name: "Shot design" });
     expect(design.textContent).toContain("6s");
@@ -240,7 +282,7 @@ describe("ProductionPage prompt refresh", () => {
       profile_id: "builtin-official-h3", display_name: "Built-in Official H3", source: "builtin",
       warning: { code: "profile_changed", message: "Custom workflow hash changed" },
     }, profiles: [] });
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Run H3" }));
     fireEvent.click(screen.getByRole("button", { name: "Submit H3" }));
     await waitFor(() => expect(submitShot).toHaveBeenCalled());
@@ -276,7 +318,7 @@ describe("ProductionPage prompt refresh", () => {
     vi.mocked(getH3Job).mockResolvedValue(job);
     render(<ProductionPage active />);
     await screen.findByText("Workflow: My H3 Quality Profile");
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     await waitFor(() => expect(getH3Job).toHaveBeenCalledWith("job-existing"));
     fetchH3ProfilesMock.mockResolvedValue({ active: { display_name: "Built-in Official H3", source: "builtin",
       warning: { code: "profile_changed", message: "Profile damaged during run" } }, profiles: [] });
@@ -319,7 +361,7 @@ describe("ProductionPage prompt refresh", () => {
     });
 
     render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Run H3" }));
     fireEvent.change(screen.getByRole("combobox", { name: "H3 provider" }), {
       target: { value: "minimax" },
@@ -347,7 +389,7 @@ describe("ProductionPage prompt refresh", () => {
     currentProjectId = "prj_test";
     rerender(<ProductionPage active />);
 
-    await screen.findByText("Corridor walk-in");
+    await screen.findAllByText("Corridor walk-in");
     await act(async () => rejectStale(new Error("Project not found")));
 
     expect(screen.queryByText("Project not found")).toBeNull();
@@ -364,14 +406,33 @@ describe("ProductionPage prompt refresh", () => {
     vi.mocked(getProject).mockResolvedValue(detail(shot(generatedPrompt)));
 
     render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Run H3" }));
 
     expect(await screen.findByText("Takes")).toBeTruthy();
-    expect(screen.getByText("job_old")).toBeTruthy();
-    expect(screen.getByText(/pinned/)).toBeTruthy();
+    expect(screen.getByText("Take 01")).toBeTruthy();
+    expect(screen.getByText("Take 02 · pinned")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Pin" }));
 
+    await waitFor(() => {
+      expect(pinShotTake).toHaveBeenCalledWith("prj_test", "sht_1", "job_old");
+    });
+  });
+
+  it("lists H3 takes on mobile Production and pins a succeeded take", async () => {
+    vi.mocked(listShotTakes).mockResolvedValue({
+      items: [
+        { id: "job_old", status: "succeeded", created_at: "2026-01-01T00:00:00Z", pinned: false },
+        { id: "job_new", status: "succeeded", created_at: "2026-01-01T00:01:00Z", pinned: true },
+      ],
+    });
+    vi.mocked(pinShotTake).mockResolvedValue({});
+    vi.mocked(getProject).mockResolvedValue(detail(shot(generatedPrompt)));
+
+    render(<ProductionPage active mobile />);
+    expect(await screen.findByText("Takes")).toBeTruthy();
+    expect(screen.getByText("Take 01")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Pin" }));
     await waitFor(() => {
       expect(pinShotTake).toHaveBeenCalledWith("prj_test", "sht_1", "job_old");
     });
@@ -381,7 +442,7 @@ describe("ProductionPage prompt refresh", () => {
     vi.mocked(getProject).mockResolvedValue(detail(shot(generatedPrompt)));
 
     const { container } = render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Run H3" }));
 
     expect(container.querySelector(".production-submit-actions")).toBeTruthy();
@@ -564,7 +625,7 @@ describe("ProductionPage prompt refresh", () => {
     vi.mocked(getProject).mockResolvedValue(detail(shot(generatedPrompt)));
 
     render(<ProductionPage active />);
-    await screen.findByText("Corridor walk-in");
+    await screen.findAllByText("Corridor walk-in");
 
     expect(screen.queryByRole("columnheader", { name: "Layout" })).toBeNull();
     expect(screen.queryByText("approved")).toBeNull();
@@ -574,7 +635,7 @@ describe("ProductionPage prompt refresh", () => {
     vi.mocked(getProject).mockResolvedValue(detail(shot(generatedPrompt)));
 
     render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
 
     expect(screen.queryByText("Insert image…")).toBeNull();
     expect(screen.queryByText("Skip layout")).toBeNull();
@@ -613,7 +674,7 @@ describe("ProductionPage prompt refresh", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("button", { name: "Delete Layout" }));
 
     await waitFor(() =>
@@ -688,18 +749,49 @@ describe("ProductionPage prompt refresh", () => {
     expect(screen.queryByText("reference frame review")).toBeNull();
   });
 
+  it("does not load the project until Production is active", async () => {
+    vi.mocked(getProject).mockResolvedValue(detail(shot(emptyPrompt)));
+    render(<ProductionPage active={false} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getProject).not.toHaveBeenCalled();
+  });
+
+  it("does not keep polling shots that are queued without an H3 job", async () => {
+    const queuedWithoutJob = { ...shot(generatedPrompt), status: "queued" as const, h3_job_id: null };
+    vi.mocked(getProject).mockResolvedValue(detail(queuedWithoutJob));
+    vi.useFakeTimers();
+    render(<ProductionPage active />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getAllByText("Corridor walk-in").length).toBeGreaterThan(0);
+    const initialCalls = vi.mocked(getProject).mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getProject).toHaveBeenCalledTimes(initialCalls);
+  });
+
   it("loads a generated prompt when the Production tab becomes active", async () => {
     vi.mocked(getProject)
       .mockResolvedValueOnce(detail(shot(emptyPrompt)))
       .mockResolvedValueOnce(detail(shot(generatedPrompt)));
 
-    const { rerender } = render(<ProductionPage active={false} />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    const { rerender } = render(<ProductionPage active />);
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Prompt" }));
     expect(
       (screen.getByLabelText("Summary") as HTMLTextAreaElement).value,
     ).toBe("");
 
+    rerender(<ProductionPage active={false} />);
     rerender(<ProductionPage active />);
 
     await waitFor(() =>
@@ -722,12 +814,13 @@ describe("ProductionPage prompt refresh", () => {
       .mockResolvedValueOnce(detail(shot(generatedPrompt)))
       .mockResolvedValueOnce(detail(refreshedShot));
 
-    const { rerender } = render(<ProductionPage active={false} />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    const { rerender } = render(<ProductionPage active />);
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Prompt" }));
     const summary = screen.getByLabelText("Summary") as HTMLTextAreaElement;
     fireEvent.change(summary, { target: { value: "My unsaved manual edit." } });
 
+    rerender(<ProductionPage active={false} />);
     rerender(<ProductionPage active />);
     await screen.findAllByText("Updated corridor");
     await act(async () => {
@@ -737,6 +830,57 @@ describe("ProductionPage prompt refresh", () => {
     expect((screen.getByLabelText("Summary") as HTMLTextAreaElement).value).toBe(
       "My unsaved manual edit.",
     );
+  });
+
+  it("does not let a running-shot poll overwrite unsaved prompt text", async () => {
+    const running = {
+      ...shot(generatedPrompt),
+      status: "running" as const,
+      h3_job_id: "job_run",
+    };
+    const rewritten = {
+      ...running,
+      prompt_sections: { ...generatedPrompt, summary: "Poll rewrite from server." },
+    };
+    vi.mocked(getProject)
+      .mockResolvedValueOnce(detail(running))
+      .mockResolvedValue(detail(rewritten));
+    vi.mocked(getH3Job).mockResolvedValue({
+      id: "job_run",
+      status: "running",
+      name: "run",
+      notes: "",
+      prompt: "",
+      dialogue: [],
+      frames: 90,
+      error: null,
+      comfy_prompt_id: null,
+      external_task_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      outputs: {},
+      input_previews: {},
+      pipeline_id: "h3_ref2va",
+    });
+
+    vi.useFakeTimers();
+    render(<ProductionPage active />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getAllByText("Corridor walk-in")[0]);
+    fireEvent.click(screen.getByRole("tab", { name: "Prompt" }));
+    const summary = screen.getByLabelText("Summary") as HTMLTextAreaElement;
+    fireEvent.change(summary, { target: { value: "My unsaved manual edit." } });
+
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(summary.value).toBe("My unsaved manual edit.");
   });
 
   it("shows ordered playable Voice references in the Refs tab", async () => {
@@ -771,7 +915,7 @@ describe("ProductionPage prompt refresh", () => {
     ]);
 
     const { container } = render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Refs" }));
 
     expect(await screen.findByText("Audio 1")).toBeTruthy();
@@ -807,7 +951,7 @@ describe("ProductionPage prompt refresh", () => {
     });
 
     render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Refs" }));
     fireEvent.change(await screen.findByLabelText("Add Voice reference"), {
       target: { value: "voi_mia" },
@@ -868,7 +1012,7 @@ describe("ProductionPage prompt refresh", () => {
     ]);
 
     render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Refs" }));
 
     const select = await screen.findByLabelText("Add Voice reference") as HTMLSelectElement;
@@ -883,7 +1027,7 @@ describe("ProductionPage prompt refresh", () => {
     );
 
     render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Refs" }));
 
     expect(await screen.findByText("Exact source audio controls this run")).toBeTruthy();
@@ -922,7 +1066,7 @@ describe("ProductionPage prompt refresh", () => {
     });
 
     render(<ProductionPage active />);
-    fireEvent.click(await screen.findByText("Corridor walk-in"));
+    fireEvent.click((await screen.findAllByText("Corridor walk-in"))[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Run H3" }));
     fireEvent.change(screen.getByLabelText("Resolution"), {
       target: { value: "landscape-720" },

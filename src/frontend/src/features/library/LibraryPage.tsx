@@ -46,9 +46,13 @@ export function LibraryPage({
   const [folderAsset, setFolderAsset] = useState<LibraryAsset | null>(null);
   const [editingAsset, setEditingAsset] = useState<LibraryAsset | null>(null);
 
-  const onMetadataSaved = (updated: LibraryAsset) => {
+  const applyAssetUpdate = useCallback((updated: LibraryAsset) => {
     setAssets((current) => current.map((asset) => asset.id === updated.id ? updated : asset));
     setFolderAsset((current) => current?.id === updated.id ? updated : current);
+  }, []);
+
+  const onMetadataSaved = (updated: LibraryAsset) => {
+    applyAssetUpdate(updated);
     setEditingAsset(null);
   };
 
@@ -139,14 +143,16 @@ export function LibraryPage({
                 +
               </button>
             ) : null}
-            <button
-              type="button"
-              className="btn secondary"
-              onClick={refresh}
-              disabled={!projectId}
-            >
-              Refresh
-            </button>
+            {!mobile ? (
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={refresh}
+                disabled={!projectId}
+              >
+                Refresh
+              </button>
+            ) : null}
           </>
         ) : null
       }
@@ -312,7 +318,7 @@ export function LibraryPage({
           onEdit={() => setEditingAsset(folderAsset)}
           onMoveToCostumes={folderAsset.kind === "props" ? () => void onMoveToCostumes(folderAsset) : undefined}
           onDelete={() => void onDeleteAsset(folderAsset)}
-          onUpdated={onMetadataSaved}
+          onUpdated={applyAssetUpdate}
         />
       ) : null}
 

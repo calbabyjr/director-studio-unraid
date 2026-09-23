@@ -5,9 +5,11 @@ import { ActorTakesList } from "./ActorTakesList";
 import {
   addActorVoiceSample,
   addLibraryAssetFile,
+  deleteLibraryAssetFile,
   getActorJob,
   getLibraryAsset,
   updateActorSheet,
+  updateLibraryAsset,
   type LibraryAsset,
 } from "./api";
 
@@ -95,6 +97,12 @@ export function assetSlots(asset: LibraryAsset): OutputSlot[] {
     }));
 }
 
+function dressFromMeta(meta: LibraryAsset["meta"] | undefined): "unclothed" | "clothed" {
+  return meta?.dress_state === "clothed" ? "clothed" : "unclothed";
+}
+
+const SHEET_TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
+
 export function AssetDetailDialog({
   asset,
   busy = false,
@@ -112,29 +120,48 @@ export function AssetDetailDialog({
   onMoveToCostumes?: () => void;
   onUpdated?: (asset: LibraryAsset) => void;
 }) {
-  const slots = useMemo(() => assetSlots(asset), [asset]);
+  const [current, setCurrent] = useState(asset);
+  const slots = useMemo(() => assetSlots(current), [current]);
   const imageSlots = useMemo(() => slots.filter((slot) => !isAudioSlot(slot)), [slots]);
   const audioSlots = useMemo(() => slots.filter(isAudioSlot), [slots]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [viewKey, setViewKey] = useState("face");
-  const [adding, setAdding] = useState<"image" | "voice" | "sheet" | null>(null);
+  const [adding, setAdding] = useState<"image" | "voice" | "sheet" | "delete" | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const [sheetJobId, setSheetJobId] = useState<string | null>(
-    typeof asset.meta?.sheet_update_job_id === "string" ? asset.meta.sheet_update_job_id : null,
+    typeof current.meta?.sheet_update_job_id === "string" ? current.meta.sheet_update_job_id : null,
   );
   const [sheetStatus, setSheetStatus] = useState<string | null>(null);
+  const [dressState, setDressState] = useState<"unclothed" | "clothed">(dressFromMeta(current.meta));
   const fileRef = useRef<HTMLInputElement>(null);
   const voiceRef = useRef<HTMLInputElement>(null);
-  const canAddImages = asset.kind !== "voices";
-  const canAddVoice = asset.kind === "actors";
+  const onUpdatedRef = useRef(onUpdated);
+  onUpdatedRef.current = onUpdated;
+  const canAddImages = current.kind !== "voices";
+  const canAddVoice = current.kind === "actors";
   const busyAdd = busy || adding != null;
+  const sheetActive = sheetStatus === "queued" || sheetStatus === "uploading" || sheetStatus === "running";
+  const lockClose = busyAdd || sheetActive;
+
+  useEffect(() => {
+    setCurrent(asset);
+  }, [asset]);
+
+  useEffect(() => {
+    setDressState(dressFromMeta(current.meta));
+  }, [current.id, current.meta?.dress_state]);
+
+  const commit = (updated: LibraryAsset) => {
+    setCurrent(updated);
+    onUpdatedRef.current?.(updated);
+  };
 
   const onAddImage = async (file: File) => {
     setAdding("image");
     setAddError(null);
     try {
-      const updated = await addLibraryAssetFile(asset.kind, asset.id, file, viewKey);
-      onUpdated?.(updated);
+      commit(await addLibraryAssetFile(current.kind, current.id, file, viewKey));
     } catch (cause) {
       setAddError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -146,7 +173,7 @@ export function AssetDetailDialog({
     setAdding("sheet");
     setAddError(null);
     try {
-      const job = await updateActorSheet(asset.id);
+      const job = await updateActorSheet(current.id, { dress_state: dressState });
       setSheetJobId(job.id);
       setSheetStatus(job.status);
     } catch (cause) {
@@ -156,10 +183,9 @@ export function AssetDetailDialog({
     }
   };
 
-  const sheetActive = sheetStatus === "queued" || sheetStatus === "uploading" || sheetStatus === "running";
-
   useEffect(() => {
     if (!sheetJobId || !canAddVoice) return;
+    if (sheetStatus && SHEET_TERMINAL.has(sheetStatus)) return;
     let cancelled = false;
     const tick = () => {
       getActorJob(sheetJobId)
@@ -167,8 +193,8 @@ export function AssetDetailDialog({
           if (cancelled) return;
           setSheetStatus(job.status);
           if (job.status === "succeeded") {
-            const updated = await getLibraryAsset(asset.kind, asset.id);
-            if (!cancelled) onUpdated?.(updated);
+            const updated = await getLibraryAsset(current.kind, current.id);
+            if (!cancelled) commit(updated);
           }
           if (job.status === "failed" || job.status === "cancelled") {
             setAddError(job.error || `Asset sheet ${job.status}`);
@@ -182,14 +208,33 @@ export function AssetDetailDialog({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [asset.id, asset.kind, canAddVoice, onUpdated, sheetJobId]);
+  }, [canAddVoice, current.id, current.kind, sheetJobId, sheetStatus]);
+
+  const onDeleteFile = async (key: string, label: string, filename: string | null) => {
+    const detail = filename ? `${label} (${filename})` : label;
+    if (!window.confirm(`Remove ${detail} from ${current.name}? Update asset sheet will stop using this still.`)) {
+      return;
+    }
+    setAdding("delete");
+    setDeletingKey(key);
+    setAddError(null);
+    try {
+      const updated = await deleteLibraryAssetFile(current.kind, current.id, key);
+      commit(updated);
+      setLightboxIndex(null);
+    } catch (cause) {
+      setAddError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAdding(null);
+      setDeletingKey(null);
+    }
+  };
 
   const onAddVoice = async (file: File) => {
     setAdding("voice");
     setAddError(null);
     try {
-      const updated = await addActorVoiceSample(asset.id, file);
-      onUpdated?.(updated);
+      commit(await addActorVoiceSample(current.id, file));
     } catch (cause) {
       setAddError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -197,25 +242,82 @@ export function AssetDetailDialog({
     }
   };
 
+  const onDressChange = (next: "unclothed" | "clothed") => {
+    const previous = dressState;
+    setDressState(next);
+    void updateLibraryAsset(current.kind, current.id, { dress_state: next })
+      .then(commit)
+      .catch((cause) => {
+        setDressState(previous);
+        setAddError(cause instanceof Error ? cause.message : String(cause));
+      });
+  };
+
+  const filesBlock = slots.length === 0 ? (
+    <p className="empty-copy">No files in this asset.</p>
+  ) : (
+    <>
+      {audioSlots.length ? (
+        <div className="folder-file-grid">
+          {audioSlots.map((slot) => (
+            <div key={slot.key} className="folder-file-card voice-file-card">
+              <div className="folder-file-label">{slot.label}</div>
+              <audio controls preload="metadata" src={slot.url || undefined} />
+              {slot.filename ? <div className="muted tiny ellipsis">{slot.filename}</div> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {imageSlots.length ? (
+        <div className="folder-file-grid">
+          {imageSlots.map((slot, index) => (
+            <div key={slot.key} className="folder-file-card">
+              <button
+                type="button"
+                className="folder-file-thumb-btn"
+                onClick={() => setLightboxIndex(index)}
+              >
+                <div className="folder-file-thumb">
+                  {slot.url ? <img src={slot.url} alt={slot.label} /> : <div className="output-empty">—</div>}
+                </div>
+              </button>
+              <div className="folder-file-label">{slot.label}</div>
+              {slot.filename ? <div className="muted tiny ellipsis">{slot.filename}</div> : null}
+              <button
+                type="button"
+                className="btn danger sm"
+                disabled={busyAdd || sheetActive}
+                aria-label={`Delete ${slot.label}`}
+                onClick={() => void onDeleteFile(slot.key, slot.label, slot.filename ?? null)}
+              >
+                {deletingKey === slot.key ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <>
       <div
         className="folder-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={`${asset.name} assets`}
-        onClick={onClose}
+        aria-label={`${current.name} assets`}
+        onClick={() => { if (!lockClose) onClose(); }}
       >
-        <div className="folder-modal-panel" onClick={(event) => event.stopPropagation()}>
+        <div className="folder-modal-panel folder-modal-asset" onClick={(event) => event.stopPropagation()}>
           <div className="folder-modal-head">
             <div>
-              <h2 className="folder-modal-title">{asset.name}</h2>
+              <h2 className="folder-modal-title">{current.name}</h2>
               <p className="muted tiny">
-                {asset.kind} · {asset.pipeline_id || "asset"}
-                {asset.job_id ? ` · ${asset.job_id}` : ""}
-                {asset.seed != null ? ` · seed ${asset.seed}` : ""}
+                {current.kind} · {current.pipeline_id || "asset"}
+                {current.job_id ? ` · ${current.job_id}` : ""}
+                {current.seed != null ? ` · seed ${current.seed}` : ""}
               </p>
-              {asset.notes ? <p className="folder-modal-notes">{asset.notes}</p> : null}
+              {current.notes ? <p className="folder-modal-notes">{current.notes}</p> : null}
             </div>
             <div className="folder-modal-actions">
               {onEdit ? (
@@ -238,146 +340,131 @@ export function AssetDetailDialog({
                   Delete
                 </button>
               ) : null}
-              <button type="button" className="btn secondary sm" onClick={onClose}>
+              <button type="button" className="btn secondary sm" disabled={lockClose} onClick={onClose}>
                 Close
               </button>
             </div>
           </div>
 
-          {canAddImages ? (
-            <div className="folder-add-image">
-              <label>
-                <span className="muted tiny">View</span>
-                <select
-                  value={viewKey}
+          {canAddImages || canAddVoice || addError ? (
+          <div className="folder-modal-toolbar">
+            {canAddImages ? (
+              <div className="folder-add-image">
+                <label>
+                  <span className="muted tiny">View</span>
+                  <select
+                    value={viewKey}
+                    disabled={busyAdd}
+                    onChange={(event) => setViewKey(event.target.value)}
+                    aria-label="New actor view"
+                  >
+                    {EXTRA_VIEW_KEYS.map((item) => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="btn secondary sm"
                   disabled={busyAdd}
-                  onChange={(event) => setViewKey(event.target.value)}
-                  aria-label="New actor view"
+                  onClick={() => fileRef.current?.click()}
                 >
-                  {EXTRA_VIEW_KEYS.map((item) => (
-                    <option key={item.value} value={item.value}>{item.label}</option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="btn secondary sm"
-                disabled={busyAdd}
-                onClick={() => fileRef.current?.click()}
-              >
-                {adding === "image" ? "Adding…" : "Add image"}
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
-                hidden
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (file) void onAddImage(file);
-                }}
-              />
-              {canAddVoice ? (
-                <>
-                  <button
-                    type="button"
-                    className="btn primary sm"
-                    disabled={busyAdd || sheetActive || imageSlots.length === 0}
-                    onClick={() => void onUpdateSheet()}
-                  >
-                    {sheetActive || adding === "sheet" ? "Updating sheet…" : "Update asset sheet"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn secondary sm"
+                  {adding === "image" ? "Adding…" : "Add image"}
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  hidden
+                  aria-label="Actor view file"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) void onAddImage(file);
+                  }}
+                />
+              </div>
+            ) : null}
+            {canAddVoice ? (
+              <div className="folder-add-image folder-actor-sheet-actions">
+                <label>
+                  <span className="muted tiny">Body</span>
+                  <select
+                    value={dressState}
                     disabled={busyAdd || sheetActive}
-                    onClick={() => voiceRef.current?.click()}
+                    aria-label="Body"
+                    onChange={(event) => onDressChange(event.target.value as "unclothed" | "clothed")}
                   >
-                    {adding === "voice" ? "Adding…" : "Add voice sample"}
-                  </button>
-                  <input
-                    ref={voiceRef}
-                    type="file"
-                    accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg"
-                    hidden
-                    aria-label="Voice sample file"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      event.target.value = "";
-                      if (file) void onAddVoice(file);
-                    }}
-                  />
-                </>
-              ) : null}
-              {addError ? <p className="field-error">{addError}</p> : null}
-            </div>
+                    <option value="unclothed">Unclothed / nude</option>
+                    <option value="clothed">Clothed</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="btn primary sm"
+                  disabled={busyAdd || sheetActive || imageSlots.length === 0}
+                  onClick={() => void onUpdateSheet()}
+                >
+                  {sheetActive || adding === "sheet" ? "Updating sheet…" : "Update asset sheet"}
+                </button>
+                <button
+                  type="button"
+                  className="btn secondary sm"
+                  disabled={busyAdd || sheetActive}
+                  onClick={() => voiceRef.current?.click()}
+                >
+                  {adding === "voice" ? "Adding…" : "Add voice sample"}
+                </button>
+                <input
+                  ref={voiceRef}
+                  type="file"
+                  accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg"
+                  hidden
+                  aria-label="Voice sample file"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) void onAddVoice(file);
+                  }}
+                />
+              </div>
+            ) : null}
+            {addError ? <p className="field-error">{addError}</p> : null}
+            {canAddVoice ? (
+              <p className="muted tiny folder-voice-hint">
+                Extra stills stay on this actor and feed Update asset sheet, including clothed JPEGs. Delete any still you do not want copied, then Update. Voice samples also become H3-ready Voice library assets (2–15 seconds).
+              </p>
+            ) : null}
+            {sheetStatus && canAddVoice ? (
+              <p className="muted tiny" role="status">
+                Sheet job {sheetStatus}{sheetJobId ? ` · ${sheetJobId}` : ""}
+              </p>
+            ) : null}
+          </div>
           ) : null}
 
-          {canAddVoice ? (
-            <p className="muted tiny folder-voice-hint">
-              Extra stills stay on this actor. Update asset sheet rebuilds the master and three-view from those photos, then keeps the extras. Voice samples also become H3-ready Voice library assets (2–15 seconds).
-            </p>
-          ) : null}
-          {sheetStatus && canAddVoice ? (
-            <p className="muted tiny" role="status">
-              Sheet job {sheetStatus}{sheetJobId ? ` · ${sheetJobId}` : ""}
-            </p>
-          ) : null}
-
-          {asset.kind === "actors" ? (
-            <ActorTakesList
-              actorId={asset.id}
-              busy={busyAdd}
-              onPinned={onUpdated}
-            />
-          ) : null}
-
-          {slots.length === 0 ? (
-            <p className="empty-copy">No files in this asset.</p>
-          ) : (
-            <>
-              {audioSlots.length ? (
-                <div className="folder-file-grid">
-                  {audioSlots.map((slot) => (
-                    <div key={slot.key} className="folder-file-card voice-file-card">
-                      <div className="folder-file-label">{slot.label}</div>
-                      <audio controls preload="metadata" src={slot.url || undefined} />
-                      {slot.filename ? <div className="muted tiny ellipsis">{slot.filename}</div> : null}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {imageSlots.length ? (
-                <div className="folder-file-grid">
-                  {imageSlots.map((slot, index) => (
-                    <button
-                      key={slot.key}
-                      type="button"
-                      className="folder-file-card"
-                      onClick={() => setLightboxIndex(index)}
-                    >
-                      <div className="folder-file-thumb">
-                        {slot.url ? <img src={slot.url} alt={slot.label} /> : <div className="output-empty">—</div>}
-                      </div>
-                      <div className="folder-file-label">{slot.label}</div>
-                      {slot.filename ? <div className="muted tiny ellipsis">{slot.filename}</div> : null}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </>
-          )}
+          <div className="folder-modal-body">
+            {filesBlock}
+            {current.kind === "actors" ? (
+              <ActorTakesList
+                actorId={current.id}
+                busy={busyAdd}
+                onPinned={commit}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
 
       {lightboxIndex != null ? (
-        <Lightbox
-          slots={imageSlots}
-          index={lightboxIndex}
-          onClose={() => setLightboxIndex(null)}
-          onIndex={setLightboxIndex}
-        />
+        <div className="folder-modal-lightbox">
+          <Lightbox
+            slots={imageSlots}
+            index={lightboxIndex}
+            onClose={() => setLightboxIndex(null)}
+            onIndex={setLightboxIndex}
+          />
+        </div>
       ) : null}
     </>
   );

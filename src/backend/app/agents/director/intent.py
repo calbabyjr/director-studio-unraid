@@ -331,6 +331,49 @@ def validate_gpt_generation_prompt(prompt: str, source_count: int) -> None:
         )
 
 
+def draft_screenplay_intent(message: str) -> bool:
+    """Premise / write-a-script requests, not finished Fountain pages."""
+    if looks_like_script(message):
+        return False
+    text = normalize_text(message)
+    if is_script_query(message, message):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:write|draft|author|adapt|turn)\b.{0,40}\b(?:script|screenplay|pages)\b|"
+            r"\b(?:screenplay|script)\b.{0,24}\b(?:from|based on|about|premise)\b|"
+            r"\bpremise\b|"
+            r"(?:写|起草|改编).{0,8}(?:剧本|脚本)",
+            text,
+            flags=re.I,
+        )
+    )
+
+
+def ask_choices_intent(message: str) -> bool:
+    """User asked to answer with checkboxes / multiple choice."""
+    return bool(
+        re.search(
+            r"\b(?:checkbox(?:es)?|check\s*boxes|multiple[-\s]?choice|tick(?:ing)?\s+boxes)\b",
+            normalize_text(message),
+            flags=re.I,
+        )
+    )
+
+
+def lock_script_intent(message: str) -> bool:
+    text = normalize_text(message)
+    return bool(
+        re.search(
+            r"\b(?:lock|approve|adopt|finalize|that's the script|that is the script)\b.{0,24}\b(?:script|screenplay|draft|pages)?\b|"
+            r"(?:锁定|批准|就用这份).{0,8}(?:剧本|脚本|草稿)",
+            text,
+            flags=re.I,
+        )
+        and not re.search(r"\bunlock\b|解锁", text, flags=re.I)
+    )
+
+
 def looks_like_script(text: str) -> bool:
     value = text or ""
     if len(value) < 40:

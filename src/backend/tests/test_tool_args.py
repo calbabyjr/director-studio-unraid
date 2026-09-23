@@ -30,6 +30,19 @@ def test_native_reply_parses_string_arguments():
 
 
 def test_claims_pending_write_prompt():
+    from app.agents.director.chat_orchestrator import pending_tool_continuation
+
     assert _claims_pending_tool("I'll call write_prompt for shot index 1 now.")
     assert _claims_pending_tool("I will call append_shot now.")
+    assert _claims_pending_tool(
+        "I'll run through all open tasks in a tight sequence: write the H3 prompts "
+        "for every shot.\n\nStarting now:\n\nI'll proceed shot by shot. "
+        "First: write the H3 prompt for Establish the Space."
+    )
     assert not _claims_pending_tool("The prompt is already written.")
+    assert not _claims_pending_tool("I will keep your existing Picture bindings locked.")
+    nudge = pending_tool_continuation(
+        "First: write the H3 prompt for Establish the Space."
+    )
+    assert "write_prompt" in nudge
+    assert "Do not repeat the plan" in nudge

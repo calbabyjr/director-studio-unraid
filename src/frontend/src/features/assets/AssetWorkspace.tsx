@@ -98,11 +98,17 @@ export function AssetWorkspace() {
                   Import {IMPORT_LABELS[workflowCategory]}
                 </button>
               </div>
-              {workflowCategory === "actors" ? <CastingPage onOpenLibrary={() => setCategory("library")} /> : null}
-              {workflowCategory === "scenes" ? <SetDesignPage onOpenLibrary={() => setCategory("library")} /> : null}
-              {workflowCategory === "props" ? <PropsPage onOpenLibrary={() => setCategory("library")} /> : null}
+              {workflowCategory === "actors" ? (
+                <CastingPage active={category === "actors"} onOpenLibrary={() => setCategory("library")} />
+              ) : null}
+              {workflowCategory === "scenes" ? (
+                <SetDesignPage active={category === "scenes"} onOpenLibrary={() => setCategory("library")} />
+              ) : null}
+              {workflowCategory === "props" ? (
+                <PropsPage active={category === "props"} onOpenLibrary={() => setCategory("library")} />
+              ) : null}
               {workflowCategory === "costumes" ? (
-                <PropsPage kind="costume" onOpenLibrary={() => setCategory("library")} />
+                <PropsPage kind="costume" active={category === "costumes"} onOpenLibrary={() => setCategory("library")} />
               ) : null}
               {workflowCategory === "voices" ? (
                 <div className="asset-guidance-card">

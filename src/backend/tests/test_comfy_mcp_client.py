@@ -267,6 +267,41 @@ async def test_validate_workflow_returns_payload_and_removes_temp_graph():
 
 
 @pytest.mark.asyncio
+async def test_validate_workflow_fills_latent_upscaler_required_booleans():
+    captured: list[dict] = []
+
+    def capture(_name: str, arguments: dict):
+        captured.append(
+            json.loads(Path(arguments["workflow_path"]).read_text(encoding="utf-8"))
+        )
+        return _result({"valid": True, "error_count": 0, "warnings": []})
+
+    session = FakeToolSession([capture])
+    client = ComfyMcpClient(session=session)
+    graph = {
+        "333": {
+            "class_type": "MinimaxH3LatentUpscaler3D",
+            "inputs": {
+                "latent": ["226", 0],
+                "model_name": "minimax_h3_latent_upscaler_3d_fp16.safetensors",
+                "mode": "2x",
+                "precision": "fp16",
+                "device": "cuda",
+                "align": True,
+            },
+        }
+    }
+
+    payload = await client.validate_workflow(graph)
+
+    assert payload == {"valid": True, "error_count": 0, "warnings": []}
+    inputs = captured[0]["333"]["inputs"]
+    assert inputs["enable_temporal_chunking"] is True
+    assert inputs["force_unload"] is True
+    assert "enable_temporal_chunking" not in graph["333"]["inputs"]
+
+
+@pytest.mark.asyncio
 async def test_validate_workflow_formats_all_structured_errors():
     session = FakeToolSession(
         [

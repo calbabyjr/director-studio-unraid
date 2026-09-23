@@ -111,6 +111,37 @@ REF_ACTOR_MASTER_PROMPT = (
     "Exactly one person, no text, no collage, no props."
 )
 
+DRESS_UNCLOTHED = "unclothed"
+DRESS_CLOTHED = "clothed"
+DRESS_STATES = (DRESS_UNCLOTHED, DRESS_CLOTHED)
+
+_DRESS_UNCLOTHED_PROMPT = (
+    "DRESS STATE (mandatory): the actor is fully unclothed / nude. Bare skin only. "
+    "No clothing, no lingerie, no bra, no panties, no towel, no sheet, no drape, "
+    "no robe, no jacket, no studio wear. Keep the body uncovered in every panel."
+)
+_DRESS_CLOTHED_PROMPT = (
+    "DRESS STATE (mandatory): the actor is clothed. Follow the wardrobe photo and/or "
+    "USER DESCRIPTION for the outfit. Do not strip or undress the actor."
+)
+_DRESS_UNCLOTHED_NEGATIVE = (
+    "clothing, clothes, outfit, lingerie, bra, panties, underwear, towel, drape, "
+    "robe, dress, shirt, pants, jacket, studio wear, covered breasts, covered body"
+)
+
+
+def normalize_dress_state(value: str | None) -> str:
+    raw = (value or "").strip().lower()
+    if raw in {DRESS_CLOTHED, "clothes", "clothed", "wardrobe", "dressed", "outfit"}:
+        return DRESS_CLOTHED
+    return DRESS_UNCLOTHED
+
+
+def dress_state_prompt(dress_state: str | None) -> str:
+    if normalize_dress_state(dress_state) == DRESS_CLOTHED:
+        return _DRESS_CLOTHED_PROMPT
+    return _DRESS_UNCLOTHED_PROMPT
+
 _EXTRA_MASTER_PROMPT = (
     " Additional photos of the SAME person are provided as Image 2"
     "{and_image3} ({labels}). Fuse identity from every photo: face from close-ups, "
@@ -348,6 +379,7 @@ def build_actor_prompt(
     extra_images: dict[str, str] | None = None,
     include_headwear: bool = False,
     include_footwear: bool = False,
+    dress_state: str | None = None,
     seed: int | None = None,
     job_id: str | None = None,
 ) -> tuple[dict[str, Any], int]:
@@ -370,11 +402,21 @@ def build_actor_prompt(
     }
 
     # Single description — also injected into ref-path master (node 63), not only text path 58
+    if not (dress_state or "").strip() and wardrobe_image_name:
+        dress = DRESS_CLOTHED
+    else:
+        dress = normalize_dress_state(dress_state)
+    if dress == DRESS_UNCLOTHED:
+        wardrobe_image_name = None
     desc = (description or "").strip() or DEFAULT_DESCRIPTION
+    desc = f"{dress_state_prompt(dress)}\n\n{desc}"
     prompt[NODE_DESCRIPTION]["inputs"]["value"] = desc
     prompt[NODE_BODY]["inputs"]["value"] = ""
     prompt[NODE_HAIR]["inputs"]["value"] = ""
-    prompt[NODE_NEGATIVE]["inputs"]["text"] = negative_prompt or DEFAULT_NEGATIVE
+    negative = negative_prompt or DEFAULT_NEGATIVE
+    if dress == DRESS_UNCLOTHED and _DRESS_UNCLOTHED_NEGATIVE not in negative:
+        negative = f"{negative}, {_DRESS_UNCLOTHED_NEGATIVE}"
+    prompt[NODE_NEGATIVE]["inputs"]["text"] = negative
 
     # Master base + user description (outfit/footwear follow description when stated)
     extra_keys = [key for key in EXTRA_IMAGE_KEYS if extras.get(key)]
@@ -426,6 +468,10 @@ def build_actor_prompt(
         include_headwear=include_headwear,
         extra_image3_node=extra_image3,
     )
+    if NODE_FULLBODY_THREEVIEW_PROMPT in prompt:
+        prompt[NODE_FULLBODY_THREEVIEW_PROMPT]["inputs"]["value"] = (
+            f"{prompt[NODE_FULLBODY_THREEVIEW_PROMPT]['inputs']['value']} {dress_state_prompt(dress)}"
+        )
 
     for nid in SEED_NODES:
         if nid in prompt:

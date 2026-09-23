@@ -27,9 +27,10 @@ const MASTER_LABELS = { master: "Reference Sheet" };
 interface Props {
   onOpenLibrary: () => void;
   kind?: "prop" | "costume";
+  active?: boolean;
 }
 
-export function PropsPage({ onOpenLibrary, kind = "prop" }: Props) {
+export function PropsPage({ onOpenLibrary, kind = "prop", active = true }: Props) {
   const isCostume = kind === "costume";
   const { projectId, project } = useProject();
 
@@ -59,31 +60,34 @@ export function PropsPage({ onOpenLibrary, kind = "prop" }: Props) {
     setBusy(false);
     setSaved(null);
     setLightbox(null);
-    if (!projectId) return;
+  }, [projectId, isCostume]);
+
+  useEffect(() => {
+    if (!active || !projectId) return;
     let cancelled = false;
     (isCostume ? listCostumeJobs : listPropJobs)(projectId, 15)
       .then((jobs) => {
         if (cancelled) return;
-        const active = jobs.find((j) => ACTIVE.includes(j.status));
-        if (!active) return;
-        setJob(active);
-        if (active.name) setName(active.name);
+        const inFlight = jobs.find((j) => ACTIVE.includes(j.status));
+        if (!inFlight) return;
+        setJob(inFlight);
+        if (inFlight.name) setName(inFlight.name);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [projectId, isCostume]);
+  }, [active, projectId, isCostume]);
 
   useEffect(() => {
-    if (!job || !ACTIVE.includes(job.status)) return;
+    if (!active || !job || !ACTIVE.includes(job.status)) return;
     const t = window.setInterval(() => {
       (isCostume ? getCostumeJob : getPropJob)(job.id)
         .then(setJob)
         .catch((e) => setFormError(String(e)));
     }, 1500);
     return () => window.clearInterval(t);
-  }, [job?.id, job?.status]);
+  }, [active, isCostume, job?.id, job?.status]);
 
   const status: JobStatus | "idle" = job?.status || "idle";
   const isRunning = job ? ACTIVE.includes(job.status) : false;

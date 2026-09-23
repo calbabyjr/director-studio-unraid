@@ -544,11 +544,67 @@ def parse_storyboard_validation(text: str) -> StoryboardValidation:
 _PROMPT_SECTION_ALIASES = {
     "subject": "subject_definitions",
     "subjects": "subject_definitions",
+    "subject_definition": "subject_definitions",
+    "subjectDefinitions": "subject_definitions",
+    "subjectDefinition": "subject_definitions",
     "soundscape": "overall_soundscape",
+    "overallSoundscape": "overall_soundscape",
     "music": "non_diegetic_music",
+    "nonDiegeticMusic": "non_diegetic_music",
     "description": "detailed_description",
+    "detailedDescription": "detailed_description",
     "retention": "retention_analysis",
+    "retentionAnalysis": "retention_analysis",
 }
+
+
+def _prompt_section_text(value: Any) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float)):
+        return str(value).strip()
+    if isinstance(value, list):
+        return " ".join(part for part in (_prompt_section_text(item) for item in value) if part).strip()
+    if isinstance(value, dict):
+        preferred = [
+            _prompt_section_text(value[key])
+            for key in ("text", "value", "description", "content")
+            if key in value
+        ]
+        if any(preferred):
+            return " ".join(part for part in preferred if part).strip()
+        return " ".join(part for part in (_prompt_section_text(item) for item in value.values()) if part).strip()
+    return str(value).strip()
+
+
+def prompt_section_inventory_fallback(shot: Any) -> dict[str, str]:
+    """Fill six H3 sections from bound Pictures when the model omits a key."""
+    pictures: list[str] = []
+    for ref in getattr(shot, "refs", None) or []:
+        role = getattr(getattr(ref, "role", None), "value", None) or str(getattr(ref, "role", "reference"))
+        role = str(role).replace("_", " ").strip() or "reference"
+        index = int(getattr(ref, "picture_index", 0) or 0)
+        if index > 0:
+            pictures.append(f"<Picture {index}> defines the {role} appearance for the whole clip.")
+    if not getattr(shot, "source_audio_path", None):
+        for ref in getattr(shot, "voice_refs", None) or []:
+            index = int(getattr(ref, "audio_index", 0) or 0)
+            if index > 0:
+                pictures.append(f"<Audio {index}> defines the speaker voice identity and delivery.")
+    title = str(getattr(shot, "title", "") or "this shot").strip()
+    subject = " ".join(pictures).strip() or f"The subject of {title} holds for the whole clip."
+    beat = str(getattr(shot, "script_beat", "") or title or "Hold the established blocking.").strip()
+    duration = float(getattr(shot, "duration_s", None) or 4.0)
+    return {
+        "subject_definitions": subject,
+        "summary": beat,
+        "retention_analysis": "Hold identity, wardrobe, and set from the bound Pictures for the whole clip.",
+        "detailed_description": f"0–{duration:g} seconds: {beat}",
+        "overall_soundscape": "Quiet interior ambience matching the scene.",
+        "non_diegetic_music": "None.",
+    }
 
 
 def parse_prompt_sections_json(
@@ -564,7 +620,7 @@ def parse_prompt_sections_json(
     if isinstance(nested, dict):
         data = nested
     for alias, key in _PROMPT_SECTION_ALIASES.items():
-        if not str(data.get(key) or "").strip() and data.get(alias):
+        if not _prompt_section_text(data.get(key)) and data.get(alias) is not None:
             data[key] = data[alias]
     keys = [
         "subject_definitions",
@@ -578,13 +634,11 @@ def parse_prompt_sections_json(
     out: dict[str, str] = {}
     missing: list[str] = []
     for k in keys:
-        val = data.get(k)
-        if not isinstance(val, str) or not val.strip():
-            val = fallback.get(k) or ""
-        if not isinstance(val, str) or not val.strip():
+        val = _prompt_section_text(data.get(k)) or _prompt_section_text(fallback.get(k))
+        if not val:
             missing.append(k)
             continue
-        out[k] = val.strip()
+        out[k] = val
     if missing:
         raise ValueError(f"prompt section {missing[0]!r} missing or empty")
     return out

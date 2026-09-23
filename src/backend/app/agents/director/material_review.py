@@ -61,6 +61,24 @@ def capture_asset_image(asset, role: str, file_key: str | None) -> tuple[dict, s
     }, encoded
 
 
+def _observation_payload(raw: str) -> dict:
+    data = _extract_json_payload(raw)
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list) and data:
+        objects = [item for item in data if isinstance(item, dict)]
+        if objects:
+            return objects[0]
+        texts = [str(item).strip() for item in data if str(item).strip()]
+        if texts:
+            return {
+                "readable": True,
+                "description": " ".join(texts)[:2400],
+                "concerns": [],
+            }
+    raise ValueError("reference observation JSON must be an object")
+
+
 async def observe_reference(provider, record: dict, image: str, *, brief: str = "") -> dict:
     inspect = getattr(provider, "complete_with_images", None)
     if not callable(inspect):
@@ -77,7 +95,7 @@ async def observe_reference(provider, record: dict, image: str, *, brief: str = 
         f"{label}\nCurrent brief: {brief}\nReference: " + json.dumps(record, ensure_ascii=False),
         images=[image], guides=(),
     )
-    observation = ReferenceObservation.model_validate(_extract_json_payload(raw))
+    observation = ReferenceObservation.model_validate(_observation_payload(raw))
     if not observation.readable:
         raise ValueError("image is not reliably readable")
     return {**record, **observation.model_dump()}

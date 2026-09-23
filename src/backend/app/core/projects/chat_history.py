@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..paths import ensure_project_tree, project_root
+from .choice_questions import ChoiceQuestion
 
 
 class DirectorChatImage(BaseModel):
@@ -25,6 +26,7 @@ class DirectorChatMessage(BaseModel):
     created_at: str
     images: list[DirectorChatImage] = Field(default_factory=list)
     steps: list[str] = Field(default_factory=list)
+    choices: list[ChoiceQuestion] = Field(default_factory=list)
 
 
 def chat_history_path(project_id: str, *, create: bool = False) -> Path:
@@ -57,6 +59,7 @@ def append_chat_message(
     content: str,
     images: list[DirectorChatImage] | None = None,
     steps: list[str] | None = None,
+    choices: list[ChoiceQuestion] | None = None,
 ) -> DirectorChatMessage:
     message = DirectorChatMessage(
         id=f"msg_{uuid.uuid4().hex}",
@@ -65,6 +68,7 @@ def append_chat_message(
         created_at=datetime.now(timezone.utc).isoformat(),
         images=list(images or []),
         steps=list(steps or []),
+        choices=list(choices or []),
     )
     path = chat_history_path(project_id, create=True)
     path.parent.mkdir(parents=True, exist_ok=True)

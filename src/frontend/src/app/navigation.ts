@@ -13,7 +13,7 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { id: "assets", label: "Assets", step: "01" },
-  { id: "director", label: "Director", step: "02" },
+  { id: "director", label: "Director", step: "01" },
+  { id: "assets", label: "Assets", step: "02" },
   { id: "production", label: "Production", step: "03" },
 ];

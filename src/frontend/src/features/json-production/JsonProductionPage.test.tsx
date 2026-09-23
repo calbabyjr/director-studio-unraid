@@ -866,4 +866,60 @@ describe("JsonProductionPage three-column workspace", () => {
 
     await waitFor(() => expect(cancelH3Job).toHaveBeenCalledWith("job_json_1"));
   });
+
+  it("loads the storyboard once on mount instead of overlapping GETs", async () => {
+    render(<JsonProductionPage active />);
+    await screen.findByRole("button", { name: /shot_001/ });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getStoryboard).toHaveBeenCalledTimes(1);
+    expect(stagedAssetApi.list).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not keep polling JSON shot jobs after they finish", async () => {
+    vi.mocked(listJsonShotJobs).mockResolvedValue([
+      jobRecord({ status: "succeeded", json_shot_id: "shot_001" }),
+    ]);
+
+    render(<JsonProductionPage active />);
+    await screen.findByRole("button", { name: /shot_001/ });
+    await waitFor(() => {
+      expect(listJsonShotJobs).toHaveBeenCalledWith("prj_test", "shot_001", 1);
+      expect(listJsonShotJobs).toHaveBeenCalledWith("prj_test", "shot_002", 1);
+    });
+    const initial = vi.mocked(listJsonShotJobs).mock.calls.length;
+
+    vi.useFakeTimers();
+    await act(async () => {
+      vi.advanceTimersByTime(4500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(listJsonShotJobs).toHaveBeenCalledTimes(initial);
+  });
+
+  it("does not poll JSON shot jobs while the page is hidden", async () => {
+    vi.mocked(listJsonShotJobs).mockResolvedValue([
+      jobRecord({ status: "running", json_shot_id: "shot_001" }),
+    ]);
+
+    render(<JsonProductionPage active={false} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getStoryboard).not.toHaveBeenCalled();
+    expect(listJsonShotJobs).not.toHaveBeenCalled();
+
+    vi.useFakeTimers();
+    await act(async () => {
+      vi.advanceTimersByTime(4500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(listJsonShotJobs).not.toHaveBeenCalled();
+  });
 });

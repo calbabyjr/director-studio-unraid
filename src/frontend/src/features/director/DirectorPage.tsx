@@ -9,8 +9,12 @@ import { ShotWorkspace } from "./ShotWorkspace";
 import { ContextUsagePanel } from "./ContextUsage";
 import { ContextCompaction } from "./ContextCompaction";
 import { MemoryNotes } from "./MemoryNotes";
+import { ScriptDraftPanel } from "./ScriptDraftPanel";
+import { ScreenplayInterviewPanel } from "./ScreenplayInterviewPanel";
 import { MemoryPatrolStatus } from "./MemoryPatrolStatus";
 import { MobileShotDrawer } from "./MobileShotDrawer";
+import { firstActionableShotId, shotWorkflowStatus } from "../../shared/shotWorkflowStatus";
+import { ChoiceChecklist, parseChoiceQuestionsFromText } from "./ChoiceChecklist";
 import {
   cancelDirectorChatSession,
   DirectorChatError,
@@ -122,12 +126,20 @@ function shouldPollShot(shot: Shot): boolean {
       layout.job_status !== "failed" &&
       layout.job_status !== "cancelled",
   );
-  if (shot.layout_refs.length) {
-    // A Layout collection owns reference-frame lifecycle. Shot status still drives
-    // unrelated planning/H3 work, but cannot keep a terminal Layout polling.
-    return unresolvedLayout || ["planning", "queued", "running"].includes(shot.status);
-  }
-  return ["planning", "ref_frame_pending", "queued", "running"].includes(shot.status);
+  // ref_frame_pending with no in-flight Layout job is idle (waiting on Director),
+  // not a running worker. Polling that state hammers GET /api/projects forever.
+  return unresolvedLayout || ["planning", "queued", "running"].includes(shot.status);
+}
+
+function shotPollSignature(shots: Shot[]): string {
+  return shots
+    .map((shot) => {
+      const layouts = shot.layout_refs
+        .map((layout) => `${layout.id}:${layout.job_id || ""}:${layout.job_status || ""}:${layout.asset_id || ""}`)
+        .join(",");
+      return `${shot.id}:${shot.status}:${shot.h3_job_id || ""}:${layouts}`;
+    })
+    .join("|");
 }
 
 function JsonModeDirectorNotice() {
@@ -158,10 +170,12 @@ export function DirectorPage({
   chatOnly = false,
   mobile = false,
   requestedMessage = null,
+  active = true,
 }: {
   chatOnly?: boolean;
   mobile?: boolean;
   requestedMessage?: DirectorChatRequest | null;
+  active?: boolean;
 } = {}) {
   const { project } = useProject();
   if (project?.mode === "json_production") {
@@ -172,6 +186,7 @@ export function DirectorPage({
       chatOnly={chatOnly}
       mobile={mobile}
       requestedMessage={requestedMessage}
+      active={active}
     />
   );
 }
@@ -180,10 +195,12 @@ function DirectorAgentWorkspace({
   chatOnly,
   mobile,
   requestedMessage,
+  active,
 }: {
   chatOnly: boolean;
   mobile: boolean;
   requestedMessage: DirectorChatRequest | null;
+  active: boolean;
 }) {
   const { project, projectId, refreshProjects, createAndSelect } = useProject();
   const [shots, setShots] = useState<Shot[]>([]);
@@ -217,8 +234,10 @@ function DirectorAgentWorkspace({
   const usageProjectRef = useRef(projectId);
   usageProjectRef.current = projectId;
   const chatLogRef = useRef<HTMLDivElement | null>(null);
+  const [stickToBottom, setStickToBottom] = useState(true);
   const seenLayouts = useRef<Set<string>>(new Set());
   const shotRevision = useRef(0);
+  const lastPollSignature = useRef("");
   const handledRequestId = useRef<string | null>(null);
   const generationLocked = vramStatus?.chat_locked === true;
   const chatActive = chatSession.active;
@@ -260,6 +279,7 @@ function DirectorAgentWorkspace({
 
   const replaceShots = useCallback((nextShots: Shot[]) => {
     shotRevision.current += 1;
+    lastPollSignature.current = shotPollSignature(nextShots);
     setShots(nextShots);
   }, []);
 
@@ -324,16 +344,17 @@ function DirectorAgentWorkspace({
       setVramPollError(null);
       return;
     }
+    if (!active && !chatActive) return;
     void refreshVramStatus();
     const timer = window.setInterval(() => void refreshVramStatus(), 2500);
     return () => window.clearInterval(timer);
-  }, [projectId, refreshVramStatus]);
+  }, [projectId, active, chatActive, refreshVramStatus]);
 
   useEffect(() => {
-    if (!generationLocked) return;
+    if (!active || !generationLocked) return;
     const timer = window.setInterval(() => setClockNow(new Date()), 1000);
     return () => window.clearInterval(timer);
-  }, [generationLocked]);
+  }, [active, generationLocked]);
 
   const onChangeLlm = async (model: string) => {
     if (!model || model === llmModel) return;
@@ -356,6 +377,18 @@ function DirectorAgentWorkspace({
     replaceShots(detail.shots);
     return detail;
   }, [replaceShots]);
+
+  useEffect(() => {
+    if (!shots.length) {
+      setSelectedShotId(null);
+      return;
+    }
+    setSelectedShotId((current) =>
+      current && shots.some((shot) => shot.id === current)
+        ? current
+        : firstActionableShotId(shots),
+    );
+  }, [shots]);
 
   useEffect(() => {
     seenLayouts.current = new Set();
@@ -450,7 +483,7 @@ function DirectorAgentWorkspace({
   }, [chatActive, loadProject, projectId, refreshProjects]);
 
   useEffect(() => {
-    if (!projectId || chatActive) return;
+    if (!active || !projectId || chatActive) return;
     let disposed = false;
     const timer = window.setInterval(() => {
       getDirectorChatHistory(projectId)
@@ -463,18 +496,22 @@ function DirectorAgentWorkspace({
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [chatActive, projectId]);
+  }, [active, chatActive, projectId]);
+
+  const needsShotPoll = shots.some(shouldPollShot);
 
   // Poll while jobs run; when a new layout appears, push it into the chat
   useEffect(() => {
-    if (!projectId) return;
-    const active = shots.some(shouldPollShot);
-    if (!active) return;
+    if (!projectId || !needsShotPoll) return;
     const t = window.setInterval(() => {
       const revisionAtRequest = shotRevision.current;
       getProject(projectId)
         .then((d) => {
           if (revisionAtRequest !== shotRevision.current) return;
+          if (shotPollSignature(d.shots) === lastPollSignature.current) {
+            setPollError(null);
+            return;
+          }
           replaceShots(d.shots);
           setPollError(null);
           const fresh = d.shots.flatMap((shot) =>
@@ -505,14 +542,26 @@ function DirectorAgentWorkspace({
         });
     }, 2500);
     return () => window.clearInterval(t);
-  }, [projectId, replaceShots, shots]);
+  }, [projectId, needsShotPoll, replaceShots]);
+
+  const nearChatBottom = (log: HTMLDivElement) =>
+    log.scrollHeight - log.scrollTop - log.clientHeight < 96;
+
+  const scrollChatToBottom = () => {
+    const log = chatLogRef.current;
+    if (!log) return;
+    log.scrollTop = log.scrollHeight;
+    setStickToBottom(true);
+  };
 
   useEffect(() => {
+    if (!stickToBottom) return;
     const log = chatLogRef.current;
     if (log) log.scrollTop = log.scrollHeight;
-  }, [messages, busy, liveStatus, liveRuntime, liveThink, liveTokens]);
+  }, [messages, busy, liveStatus, liveRuntime, liveThink, liveTokens, stickToBottom]);
 
   const send = async (text?: string, options?: { preserveComposer?: boolean }) => {
+    setStickToBottom(true);
     const preserveComposer = options?.preserveComposer === true;
     const typedMessage = (text ?? draft).trim();
     const message = typedMessage || (pendingImages.length ? "Please analyze the attached image(s)." : "");
@@ -631,6 +680,7 @@ function DirectorAgentWorkspace({
           images: images.length ? images : undefined,
           thinking: (res.thinking || "").trim() || undefined,
           steps: res.steps?.length ? res.steps : undefined,
+          choices: res.choices?.length ? res.choices : undefined,
         },
       ]);
       replaceShots(res.shots);
@@ -716,13 +766,18 @@ function DirectorAgentWorkspace({
     setShots((current) => current.map((shot) => shot.id === updated.id ? updated : shot));
   };
 
+  const scriptLocked = Boolean(project?.script_locked);
   const chips = [
     { label: "Project status", text: "status" },
-    { label: "Plan shots", text: "plan" },
-    {
-      label: "Discuss Layouts",
-      text: "I want to discuss whether any shots would benefit from optional Layout studies. Ask what visual states I want before proposing sources. Do not queue generation yet.",
-    },
+    ...(scriptLocked
+      ? [
+          { label: "Plan shots", text: "plan" },
+          {
+            label: "Discuss Layouts",
+            text: "I want to discuss whether any shots would benefit from optional Layout studies. Ask what visual states I want before proposing sources. Do not queue generation yet.",
+          },
+        ]
+      : []),
   ];
   const promptRetryMessage =
     "Retry the previous failed H3 prompt once. Preserve the current storyboard, Picture references, dialogue, and shot structure. Correct only the reported prompt validation error. Do not generate a Layout or change the story.";
@@ -733,6 +788,31 @@ function DirectorAgentWorkspace({
   };
   const selectedShotIndex = Math.max(0, shots.findIndex((shot) => shot.id === selectedShotId));
   const selectedShot = shots[selectedShotIndex] ?? null;
+  const shotNumber = String(selectedShotIndex + 1).padStart(2, "0");
+  const nextChip = selectedShot
+    ? shotWorkflowStatus(selectedShot).key === "ready-for-h3"
+      ? {
+          label: `Run H3 · ${shotNumber}`,
+          text: `Queue H3 for shot ${selectedShotIndex + 1}`,
+        }
+      : {
+          label: `Write H3 · ${shotNumber}`,
+          text: `Write the H3 prompt for shot ${selectedShotIndex + 1}`,
+        }
+    : scriptLocked
+      ? { label: "Plan shots", text: "plan" }
+      : null;
+  const chipRow = mobile
+    ? [{ label: "Project status", text: "status" }, ...(nextChip ? [nextChip] : [])]
+    : [
+        ...chips,
+        ...(selectedShot
+          ? [{
+              label: `Write H3 prompt · Shot ${shotNumber}`,
+              text: `Write the H3 prompt for shot ${selectedShotIndex + 1}`,
+            }]
+          : []),
+      ];
 
   const chatPanel = (
     <section className="panel director-chat-panel">
@@ -771,6 +851,7 @@ function DirectorAgentWorkspace({
               <label className="director-model-picker inline-model-picker">
                 <span className="muted tiny">LLM</span>
                 <select
+                  aria-label="Director LLM"
                   value={llmOptions.length ? llmModel : ""}
                   disabled={chatDisabled || llmBusy || llmOptions.length === 0}
                   onChange={(e) => void onChangeLlm(e.target.value)}
@@ -800,13 +881,41 @@ function DirectorAgentWorkspace({
             </div>
           </div>
         </div>
-        {projectId ? <MemoryNotes projectId={projectId} disabled={busy || generationLocked || chatActive} /> : null}
-        {projectId ? <MemoryPatrolStatus projectId={projectId} /> : null}
-
-        {mobile && !chatOnly ? (
-          <MobileShotDrawer shots={shots} onOpenImage={setLightbox} />
+        {project ? (
+          <>
+            {!(project.script_text || "").trim() && !project.script_locked ? (
+              <ScreenplayInterviewPanel
+                project={project}
+                disabled={busy || generationLocked || chatActive}
+                onDrafted={() => { void refreshProjects(); }}
+              />
+            ) : (
+              <ScriptDraftPanel
+                project={project}
+                disabled={busy || generationLocked || chatActive}
+                onUpdated={() => { void refreshProjects(); }}
+              />
+            )}
+          </>
+        ) : null}
+        {projectId ? (
+          <MemoryNotes projectId={projectId} disabled={busy || generationLocked || chatActive}>
+            <MemoryPatrolStatus projectId={projectId} />
+          </MemoryNotes>
         ) : null}
 
+        {mobile && !chatOnly ? (
+          <MobileShotDrawer
+            shots={shots}
+            selectedId={selectedShotId}
+            onSelectShot={setSelectedShotId}
+            onSend={(message) => void send(message)}
+            sendDisabled={chatDisabled}
+            onOpenImage={setLightbox}
+          />
+        ) : null}
+
+        <div className="director-chat-thread">
         {error ? <div className="banner error">{error}</div> : null}
         {pollError ? <div className="banner error" role="alert" aria-live="polite">{pollError}</div> : null}
         {vramPollError ? <div className="banner error" role="alert" aria-live="polite">{vramPollError}</div> : null}
@@ -828,7 +937,14 @@ function DirectorAgentWorkspace({
           </div>
         ) : null}
 
-        <div className="chat-log" ref={chatLogRef}>
+        <div className="chat-log-wrap">
+        <div
+          className="chat-log"
+          ref={chatLogRef}
+          onScroll={(event) => {
+            setStickToBottom(nearChatBottom(event.currentTarget));
+          }}
+        >
           {messages.map((m, i) => {
             const images = visibleChatImages(m.images, shots);
             const canRetryPrompt = m.role === "assistant"
@@ -857,6 +973,22 @@ function DirectorAgentWorkspace({
                 </details>
               ) : null}
               <div className="chat-content">{m.content}</div>
+              {(() => {
+                const interactive = i === messages.length - 1 && m.role === "assistant";
+                const questions = m.choices?.length
+                  ? m.choices
+                  : interactive
+                    ? parseChoiceQuestionsFromText(m.content)
+                    : [];
+                if (!interactive || !questions.length) return null;
+                return (
+                  <ChoiceChecklist
+                    questions={questions}
+                    disabled={busy || chatActive}
+                    onSubmit={(text) => void send(text)}
+                  />
+                );
+              })()}
               {canRetryPrompt ? (
                 <div className="chat-message-actions">
                   <button
@@ -917,9 +1049,26 @@ function DirectorAgentWorkspace({
             </div>
           ) : null}
         </div>
+        {!stickToBottom ? (
+          <button
+            type="button"
+            className="chat-jump-bottom"
+            aria-label="Jump to latest"
+            title="Jump to latest"
+            onClick={scrollChatToBottom}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path
+                d="M4.2 7.2a1 1 0 0 1 1.4 0L10 11.6l4.4-4.4a1 1 0 1 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L4.2 8.6a1 1 0 0 1 0-1.4z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+        ) : null}
+        </div>
 
         {!chatOnly ? <div className="chat-chips">
-          {chips.map((c) => (
+          {chipRow.map((c) => (
             <button
               key={c.label}
               type="button"
@@ -930,16 +1079,6 @@ function DirectorAgentWorkspace({
               {c.label}
             </button>
           ))}
-          {selectedShot ? (
-            <button
-              type="button"
-              className="mode-chip prompt-shortcut"
-              disabled={chatDisabled}
-              onClick={() => void send(`Write the H3 prompt for shot ${selectedShotIndex + 1}`)}
-            >
-              Write H3 prompt · Shot {String(selectedShotIndex + 1).padStart(2, "0")}
-            </button>
-          ) : null}
         </div> : null}
 
         {pendingImages.length ? (
@@ -983,6 +1122,7 @@ function DirectorAgentWorkspace({
             rows={mobile ? 2 : 3}
             value={draft}
             disabled={chatDisabled}
+            aria-label="Message to Director"
             placeholder={
               projectId
                 ? "Talk to the Director about the story, a weak shot, or what you want to change…"
@@ -1015,6 +1155,7 @@ function DirectorAgentWorkspace({
               Send
             </button>
           )}
+        </div>
         </div>
     </section>
   );

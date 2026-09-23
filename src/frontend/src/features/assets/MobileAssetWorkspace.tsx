@@ -88,10 +88,18 @@ export function MobileAssetWorkspace() {
             <p className="mobile-workflow-guidance">Import a clean source; the Director will assign it to Shots.</p>
           ) : (
             <section className="mobile-workflow-surface">
-              {workflowCategory === "actors" ? <CastingPage onOpenLibrary={() => setCategory("library")} /> : null}
-              {workflowCategory === "scenes" ? <SetDesignPage onOpenLibrary={() => setCategory("library")} /> : null}
-              {workflowCategory === "props" ? <PropsPage onOpenLibrary={() => setCategory("library")} /> : null}
-              {workflowCategory === "costumes" ? <PropsPage kind="costume" onOpenLibrary={() => setCategory("library")} /> : null}
+              {workflowCategory === "actors" ? (
+                <CastingPage active={category === "actors"} onOpenLibrary={() => setCategory("library")} />
+              ) : null}
+              {workflowCategory === "scenes" ? (
+                <SetDesignPage active={category === "scenes"} onOpenLibrary={() => setCategory("library")} />
+              ) : null}
+              {workflowCategory === "props" ? (
+                <PropsPage active={category === "props"} onOpenLibrary={() => setCategory("library")} />
+              ) : null}
+              {workflowCategory === "costumes" ? (
+                <PropsPage kind="costume" active={category === "costumes"} onOpenLibrary={() => setCategory("library")} />
+              ) : null}
             </section>
           )}
         </div>

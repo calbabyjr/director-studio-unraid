@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SequencePanel } from "./SequencePanel";
 import {
@@ -111,7 +111,10 @@ function report(overrides: Partial<SequenceReport> = {}): SequenceReport {
 }
 
 describe("SequencePanel", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -133,6 +136,7 @@ describe("SequencePanel", () => {
   it("shows runtime, clip readiness, and export links", async () => {
     render(<SequencePanel projectId="prj_test" />);
     expect(await screen.findByText(/2 shots · 1 scenes · 0:12 planned · 1 clips ready/)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Cut tools"));
     expect(screen.getByRole("button", { name: "Assemble rough cut" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "SRT" }).getAttribute("href")).toBe(
       "/api/projects/prj_test/sequence/export/srt",
@@ -143,6 +147,7 @@ describe("SequencePanel", () => {
   it("selects a shot from the timeline and from a continuity note", async () => {
     const onSelectShot = vi.fn();
     render(<SequencePanel projectId="prj_test" onSelectShot={onSelectShot} />);
+    fireEvent.click(await screen.findByLabelText("Cut tools"));
     fireEvent.click(await screen.findByRole("button", { name: /01/ }));
     expect(onSelectShot).toHaveBeenCalledWith("sht_a");
     fireEvent.click(screen.getByText("Shot 02 has no succeeded H3 clip."));
@@ -176,6 +181,7 @@ describe("SequencePanel", () => {
       );
 
     render(<SequencePanel projectId="prj_test" />);
+    fireEvent.click(await screen.findByLabelText("Cut tools"));
     fireEvent.click(await screen.findByRole("button", { name: "Assemble rough cut" }));
     await waitFor(() => expect(assembleSequence).toHaveBeenCalledWith("prj_test"));
     expect(await screen.findByText(/skipped 1 shot/)).toBeTruthy();
@@ -246,6 +252,7 @@ describe("SequencePanel", () => {
       updated_at: "2026-09-22T00:00:00Z",
     });
     render(<SequencePanel projectId="prj_test" />);
+    fireEvent.click(await screen.findByLabelText("Cut tools"));
     fireEvent.click(await screen.findByRole("button", { name: "Run next" }));
     await waitFor(() =>
       expect(startProductionQueue).toHaveBeenCalledWith("prj_test", {
@@ -284,6 +291,7 @@ describe("SequencePanel", () => {
       updated_at: "2026-09-22T00:00:01Z",
     });
     render(<SequencePanel projectId="prj_test" />);
+    fireEvent.click(await screen.findByLabelText("Cut tools"));
     fireEvent.click(await screen.findByRole("button", { name: "Run remaining" }));
     await waitFor(() =>
       expect(startProductionQueue).toHaveBeenCalledWith("prj_test", {
@@ -334,6 +342,7 @@ describe("SequencePanel", () => {
       updated_at: "2026-09-22T00:00:00Z",
     });
     render(<SequencePanel projectId="prj_test" />);
+    fireEvent.click(await screen.findByLabelText("Cut tools"));
     const toggle = await screen.findByRole("checkbox", {
       name: /Chain tail frame into next shot/,
     });
@@ -348,5 +357,78 @@ describe("SequencePanel", () => {
         chain_tail_frames: false,
       }),
     );
+  });
+
+  it("does not poll getSequence while idle", async () => {
+    vi.useFakeTimers();
+    render(<SequencePanel projectId="prj_test" />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/2 shots · 1 scenes · 0:12 planned · 1 clips ready/)).toBeTruthy();
+    const initial = vi.mocked(getSequence).mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(9000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getSequence).toHaveBeenCalledTimes(initial);
+  });
+
+  it("does not fetch sequence while Production is hidden", async () => {
+    render(<SequencePanel projectId="prj_test" active={false} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getSequence).not.toHaveBeenCalled();
+    expect(getProductionQueue).not.toHaveBeenCalled();
+  });
+
+  it("keeps the last sequence report when Production is hidden", async () => {
+    const { rerender } = render(<SequencePanel projectId="prj_test" active />);
+    expect(await screen.findByText(/2 shots · 1 scenes · 0:12 planned · 1 clips ready/)).toBeTruthy();
+    rerender(<SequencePanel projectId="prj_test" active={false} />);
+    expect(screen.getByText(/2 shots · 1 scenes · 0:12 planned · 1 clips ready/)).toBeTruthy();
+  });
+
+  it("keeps the sequence report when a later live refresh fails", async () => {
+    vi.mocked(getSequence)
+      .mockResolvedValueOnce(report())
+      .mockRejectedValue(new Error("sequence unavailable"));
+    vi.useFakeTimers();
+    render(<SequencePanel projectId="prj_test" live />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/2 shots · 1 scenes · 0:12 planned · 1 clips ready/)).toBeTruthy();
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/2 shots · 1 scenes · 0:12 planned · 1 clips ready/)).toBeTruthy();
+    expect(screen.getByText("sequence unavailable")).toBeTruthy();
+  });
+
+  it("polls getSequence while live", async () => {
+    vi.useFakeTimers();
+    render(<SequencePanel projectId="prj_test" live />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/2 shots · 1 scenes · 0:12 planned · 1 clips ready/)).toBeTruthy();
+    const initial = vi.mocked(getSequence).mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(vi.mocked(getSequence).mock.calls.length).toBeGreaterThan(initial);
   });
 });

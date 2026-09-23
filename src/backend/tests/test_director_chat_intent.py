@@ -459,9 +459,13 @@ def test_chat_guidance_keeps_model_authored_script_expansion_as_a_draft():
     from app.agents.director.chat import DIRECTOR_CHAT_SYSTEM
 
     guidance = DIRECTOR_CHAT_SYSTEM.lower()
-    assert "premise or one-line brief" in guidance
-    assert "model-authored draft" in guidance
-    assert "do not call set_script until the user explicitly" in guidance
+    assert "draft_screenplay" in guidance
+    assert "unlocked draft" in guidance
+    assert "lock_script" in guidance
+    assert "finished pages" in guidance
+    assert "open or outstanding tasks" in guidance
+    assert "prose plans without a tool call are incomplete" in guidance
+    assert "ask_choices" in guidance
 
 
 def test_look_at_reference_is_llm():

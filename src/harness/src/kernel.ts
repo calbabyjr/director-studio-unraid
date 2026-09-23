@@ -62,6 +62,16 @@ const textOf = (blocks: readonly ContentBlock[]) =>
 const hostSystem = (context: any): string =>
   `${context.system}\n\nPROJECT_STATE:\n${typeof context.state === "string" ? context.state : JSON.stringify(context.state)}`;
 const SUMMARY_SYSTEM = "Summarize conversation history concisely. Preserve user decisions, creative constraints, unresolved questions and confirmed tool outcomes. Do not invent successful actions. Current project facts are supplied separately by the backend.";
+function compactionFitsWindow(
+  error: unknown,
+  committed: unknown,
+  regionFailed: boolean,
+): boolean {
+  if (committed && !regionFailed) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /not smaller/i.test(message) || /still above threshold/i.test(message);
+}
+
 function isLegacyHostSnapshot(message: Message): boolean {
   if (message.role !== "user") return false;
   const source = message.source;
@@ -272,7 +282,7 @@ export async function runTurn(
         // Native bounded attempts may commit useful summaries yet remain above
         // the early-pressure threshold. That is not a failed checkpoint.
         const after = ctx.tokenMeter.measure(args[0].session).totalTokens;
-        if (!args[2]?.aborted && this.committed && !this.regionFailed && after < input.context_window)
+        if (!args[2]?.aborted && after < input.context_window && compactionFitsWindow(error, this.committed, this.regionFailed))
           return this.committed;
         compactionFailure = error;
         throw error;

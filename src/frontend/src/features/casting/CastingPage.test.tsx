@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CastingPage } from "./CastingPage";
-import { fetchDefaults, generateActor, listActorJobs, saveJob, type JobRecord } from "./api";
+import { fetchDefaults, generateActor, getJob, listActorJobs, saveJob, type JobRecord } from "./api";
 import { listActorTakes } from "../library/api";
 
 vi.mock("../../shared/project/ProjectContext", () => ({
@@ -52,7 +52,10 @@ const finishedJob: JobRecord = {
 };
 
 describe("CastingPage", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -63,6 +66,57 @@ describe("CastingPage", () => {
       output_slots: [],
     });
     vi.mocked(listActorJobs).mockResolvedValue([]);
+  });
+
+  it("does not fetch defaults or jobs while the category is hidden", async () => {
+    render(<CastingPage active={false} onOpenLibrary={() => undefined} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchDefaults).not.toHaveBeenCalled();
+    expect(listActorJobs).not.toHaveBeenCalled();
+  });
+
+  it("does not poll an in-flight actor job while the category is hidden", async () => {
+    const running: JobRecord = { ...finishedJob, id: "actjob_run", status: "running", name: "Jenny" };
+    vi.mocked(listActorJobs).mockResolvedValue([running]);
+    vi.mocked(getJob).mockResolvedValue(running);
+
+    const { rerender } = render(<CastingPage onOpenLibrary={() => undefined} />);
+    expect(await screen.findByText("Running workbench…")).toBeTruthy();
+
+    vi.useFakeTimers();
+    rerender(<CastingPage active={false} onOpenLibrary={() => undefined} />);
+    vi.mocked(getJob).mockClear();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getJob).not.toHaveBeenCalled();
+  });
+
+  it("polls an in-flight actor job only while the category is visible", async () => {
+    const running: JobRecord = { ...finishedJob, id: "actjob_run", status: "running", name: "Jenny" };
+    vi.mocked(listActorJobs).mockResolvedValue([running]);
+    vi.mocked(getJob).mockResolvedValue(running);
+    vi.useFakeTimers();
+
+    render(<CastingPage onOpenLibrary={() => undefined} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Running workbench…")).toBeTruthy();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getJob).toHaveBeenCalledWith("actjob_run");
   });
 
   it("does not restore an old finished actor job as the current result", async () => {
@@ -140,6 +194,28 @@ describe("CastingPage", () => {
     expect((form.get("face_image") as File).name).toBe("face.png");
     expect((form.get("back_image") as File).name).toBe("back.png");
     expect(form.get("profile_image")).toBeNull();
+    expect(form.get("dress_state")).toBe("unclothed");
+  });
+
+  it("places Body beside Name and submits a clothed dress state", async () => {
+    vi.mocked(generateActor).mockResolvedValue({
+      ...finishedJob,
+      id: "actjob_body",
+      status: "queued",
+      name: "Jenny",
+    });
+    render(<CastingPage onOpenLibrary={() => undefined} />);
+    await waitFor(() => expect(fetchDefaults).toHaveBeenCalled());
+    expect((screen.getByLabelText("Body") as HTMLSelectElement).value).toBe("unclothed");
+    expect(screen.getByLabelText("Extra three-view")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Body"), { target: { value: "clothed" } });
+    fireEvent.change(screen.getByLabelText(/Name/), { target: { value: "Jenny" } });
+    fireEvent.change(screen.getByLabelText(/Actor description/), {
+      target: { value: "Adult actor" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate Actor" }));
+    await waitFor(() => expect(generateActor).toHaveBeenCalledOnce());
+    expect(vi.mocked(generateActor).mock.calls[0][0].get("dress_state")).toBe("clothed");
   });
 
   it("offers a voice sample upload on the actor form", async () => {
@@ -191,7 +267,7 @@ describe("CastingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save to Library" }));
 
     expect(await screen.findByLabelText("Actor takes")).toBeTruthy();
-    expect(screen.getByText("actjob_new")).toBeTruthy();
+    expect(await screen.findByText("actjob_new")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Pin" })).toBeTruthy();
   });
 });

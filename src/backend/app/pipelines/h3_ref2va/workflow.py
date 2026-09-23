@@ -20,6 +20,7 @@ from ...workflow_profiles.h3 import (
     ResolvedH3Profile,
     resolve_active_h3_profile,
 )
+from ...integrations.comfy_mcp import apply_known_required_defaults
 from ...workflow_profiles.h3.ui_to_api import (
     SAGE_PATCH_CLASSES,
     bypass_model_passthrough_nodes,
@@ -209,7 +210,7 @@ def fill_profile_graph(
         raise ValueError("frames is required")
     frames = validate_frame_count(int(frames))
 
-    filled = copy.deepcopy(profile.workflow)
+    filled = apply_known_required_defaults(copy.deepcopy(profile.workflow))
     binding = profile.mapping.inputs
     _assert_pure_ref2va(filled, h3_node_id=binding.h3_node_id)
     h3_inputs = filled[binding.h3_node_id].setdefault("inputs", {})

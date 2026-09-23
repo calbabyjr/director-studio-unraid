@@ -185,6 +185,36 @@ def add_asset_file(
     return write_asset(updated)
 
 
+def delete_asset_file(kind: str, asset_id: str, file_key: str) -> LibraryAsset:
+    """Remove one still (or other file) from an existing library asset."""
+    asset = load_asset(kind, asset_id)
+    if asset is None:
+        raise ValueError(f"asset not found: {kind}/{asset_id}")
+    key = (file_key or "").strip()
+    files = dict(asset.files or {})
+    if not key or key not in files:
+        raise ValueError(f"file not found: {key or file_key}")
+    filename = files.pop(key)
+    adir = find_asset_dir(kind, asset_id)
+    name = Path(str(filename or "")).name
+    if adir is not None and name:
+        path = adir / name
+        if path.is_file():
+            path.unlink()
+    meta = dict(asset.meta or {})
+    extra = [
+        item
+        for item in (meta.get("extra_views") or [])
+        if not (isinstance(item, dict) and item.get("key") == key)
+    ]
+    if extra:
+        meta["extra_views"] = extra
+    else:
+        meta.pop("extra_views", None)
+    updated = asset.model_copy(update={"files": files, "meta": meta})
+    return write_asset(updated)
+
+
 def write_asset(asset: LibraryAsset) -> LibraryAsset:
     """Public persist helper (e.g. after meta tweaks on import / insert)."""
     _write_asset(asset)

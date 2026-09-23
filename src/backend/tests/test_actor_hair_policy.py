@@ -3,6 +3,32 @@
 from app.pipelines.actor import workflow as w
 
 
+def test_unclothed_dress_state_is_injected_and_drops_wardrobe():
+    graph, _ = w.build_actor_prompt(
+        description="Jenny, adult",
+        actor_image_name="face.png",
+        wardrobe_image_name="coat.png",
+        dress_state="unclothed",
+    )
+    master = graph["63"]["inputs"]["value"]
+    assert "fully unclothed" in master
+    assert graph[w.NODE_WARDROBE_IMAGE]["inputs"]["image"] == w.BLANK_IMAGE
+    assert "clothing" in graph[w.NODE_NEGATIVE]["inputs"]["text"]
+    threeview = graph[w.NODE_FULLBODY_THREEVIEW_PROMPT]["inputs"]["value"]
+    assert "fully unclothed" in threeview
+
+
+def test_clothed_dress_state_keeps_wardrobe():
+    graph, _ = w.build_actor_prompt(
+        description="Jenny in a coat",
+        actor_image_name="face.png",
+        wardrobe_image_name="coat.png",
+        dress_state="clothed",
+    )
+    assert "the actor is clothed" in graph["63"]["inputs"]["value"]
+    assert graph[w.NODE_WARDROBE_IMAGE]["inputs"]["image"] == "coat.png"
+
+
 def test_ref_master_uses_full_identity():
     assert "REFERENCE photo" in w.REF_ACTOR_MASTER_PROMPT
     assert "Preserve the same person" in w.REF_ACTOR_MASTER_PROMPT

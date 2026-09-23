@@ -17,14 +17,28 @@ vi.mock("../library/LibraryPage", () => ({
   ),
 }));
 vi.mock("../casting/CastingPage", () => ({
-  CastingPage: () => <label>Actor preparation tool<input aria-label="Actor draft" /></label>,
+  CastingPage: ({ active }: { active?: boolean }) => (
+    <label>
+      Actor preparation tool
+      <input aria-label="Actor draft" />
+      <span data-testid="casting-active">{active ? "yes" : "no"}</span>
+    </label>
+  ),
 }));
 vi.mock("../set/SetDesignPage", () => ({
-  SetDesignPage: () => <div>Scene preparation tool</div>,
+  SetDesignPage: ({ active }: { active?: boolean }) => (
+    <div>
+      Scene preparation tool
+      <span data-testid="scene-active">{active ? "yes" : "no"}</span>
+    </div>
+  ),
 }));
 vi.mock("../props/PropsPage", () => ({
-  PropsPage: ({ kind }: { kind?: string }) => (
-    <div>{kind === "costume" ? "Costume preparation tool" : "Prop preparation tool"}</div>
+  PropsPage: ({ kind, active }: { kind?: string; active?: boolean }) => (
+    <div>
+      {kind === "costume" ? "Costume preparation tool" : "Prop preparation tool"}
+      <span data-testid={kind === "costume" ? "costume-active" : "prop-active"}>{active ? "yes" : "no"}</span>
+    </div>
   ),
 }));
 vi.mock("../library/api", () => ({
@@ -159,6 +173,27 @@ describe("AssetWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Actors" }));
 
     expect((screen.getByRole("textbox", { name: "Actor draft" }) as HTMLInputElement).value).toBe("Mia close-up reference");
+  });
+
+  it("marks only the visible preparation category as active", () => {
+    state.project = {
+      id: "prj_1", name: "Film", script_text: "", mode: "director",
+      created_at: "2026-01-01", updated_at: "2026-01-01", shot_ids: [],
+    };
+    render(<AssetWorkspace />);
+
+    expect(screen.getByTestId("casting-active").textContent).toBe("no");
+    expect(screen.getByTestId("scene-active").textContent).toBe("no");
+    expect(screen.getByTestId("prop-active").textContent).toBe("no");
+    expect(screen.getByTestId("costume-active").textContent).toBe("no");
+
+    fireEvent.click(screen.getByRole("button", { name: "Actors" }));
+    expect(screen.getByTestId("casting-active").textContent).toBe("yes");
+    expect(screen.getByTestId("scene-active").textContent).toBe("no");
+
+    fireEvent.click(screen.getByRole("button", { name: "Scenes" }));
+    expect(screen.getByTestId("casting-active").textContent).toBe("no");
+    expect(screen.getByTestId("scene-active").textContent).toBe("yes");
   });
 
   it("opens a costume preparation workflow", () => {

@@ -67,4 +67,25 @@ describe("AssetImportDialog", () => {
 
     await waitFor(() => expect(importExternalAsset).toHaveBeenCalledTimes(1));
   });
+
+  it("does not dismiss the dialog from the overlay while importing", async () => {
+    vi.mocked(importExternalAsset).mockImplementation(() => new Promise(() => undefined));
+    const onClose = vi.fn();
+    render(
+      <AssetImportDialog
+        kind="costumes"
+        projectId="prj_1"
+        onClose={onClose}
+        onImported={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Image file"), {
+      target: { files: [new File(["jpg"], "coat.jpg", { type: "image/jpeg" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Import costume" }));
+    await waitFor(() => expect(importExternalAsset).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("dialog", { name: "Import Costumes" }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Import Costumes" })).toBeTruthy();
+  });
 });

@@ -72,19 +72,19 @@ function MobileAppShell() {
         {!jsonProductionMode ? <nav className="mobile-topbar-row mobile-workspace-nav" aria-label="Mobile workspace">
           <button
             type="button"
-            className={activePage === "asset" ? "active" : ""}
-            aria-current={activePage === "asset" ? "page" : undefined}
-            onClick={() => setPage("asset")}
-          >
-            Asset
-          </button>
-          <button
-            type="button"
             className={activePage === "director" ? "active" : ""}
             aria-current={activePage === "director" ? "page" : undefined}
             onClick={() => setPage("director")}
           >
             Director
+          </button>
+          <button
+            type="button"
+            className={activePage === "asset" ? "active" : ""}
+            aria-current={activePage === "asset" ? "page" : undefined}
+            onClick={() => setPage("asset")}
+          >
+            Assets
           </button>
           <button
             type="button"
@@ -105,7 +105,7 @@ function MobileAppShell() {
         <MobileAssetWorkspace />
       </div>
       <div className="mobile-page mobile-director-page" hidden={activePage !== "director"}>
-        <DirectorPage mobile chatOnly requestedMessage={directorRequest} />
+        <DirectorPage mobile requestedMessage={directorRequest} active={activePage === "director"} />
       </div>
       <div
         className={`mobile-page mobile-production-page${
@@ -249,7 +249,7 @@ function AppShell() {
         className={activePage === "director" ? "page-pane active" : "page-pane"}
         hidden={activePage !== "director"}
       >
-        <DirectorPage requestedMessage={directorRequest} />
+        <DirectorPage requestedMessage={directorRequest} active={activePage === "director"} />
       </div>
       <div
         className={activePage === "production" ? "page-pane active" : "page-pane"}

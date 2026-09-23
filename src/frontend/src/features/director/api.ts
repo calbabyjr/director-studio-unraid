@@ -108,9 +108,52 @@ export async function getProject(projectId: string): Promise<ProjectDetail> {
   return res.json();
 }
 
+export type ScreenplayInterviewTurn = {
+  role: "user" | "assistant";
+  content: string;
+  choices?: ChoiceQuestion[];
+};
+
+export type ScreenplayInterviewState = {
+  premise: string;
+  turns: ScreenplayInterviewTurn[];
+  ready: boolean;
+  brief: string;
+  updated_at: string;
+  drafted?: boolean;
+  script_text?: string;
+};
+
+export async function getScreenplayInterview(
+  projectId: string,
+): Promise<ScreenplayInterviewState> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/screenplay-interview`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function postScreenplayInterview(
+  projectId: string,
+  body: { message?: string; generate?: boolean; reset?: boolean },
+): Promise<ScreenplayInterviewState> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/screenplay-interview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export async function updateProject(
   projectId: string,
-  body: { name?: string; script_text?: string; soul_id?: string },
+  body: {
+    name?: string;
+    script_text?: string;
+    script_locked?: boolean;
+    script_draft_pending?: boolean;
+    soul_id?: string;
+  },
 ): Promise<Project> {
   const res = await fetch(`/api/projects/${projectId}`, {
     method: "PATCH",
@@ -133,6 +176,12 @@ export interface ChatImage {
   shot_id?: string | null;
 }
 
+export type ChoiceQuestion = {
+  prompt: string;
+  options: string[];
+  allow_multiple?: boolean;
+};
+
 export interface ChatMessage {
   id?: string;
   role: "user" | "assistant";
@@ -143,6 +192,7 @@ export interface ChatMessage {
   thinking?: string;
   /** Pipeline steps: GPU queue, tools, etc. */
   steps?: string[];
+  choices?: ChoiceQuestion[];
 }
 
 export interface DirectorMemoryNote {
@@ -400,6 +450,7 @@ export interface ChatResponse {
   images?: ChatImage[];
   thinking?: string;
   steps?: string[];
+  choices?: ChoiceQuestion[];
 }
 
 export interface ChatCompactionResult {

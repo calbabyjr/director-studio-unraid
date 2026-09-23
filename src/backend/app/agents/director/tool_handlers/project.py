@@ -36,6 +36,24 @@ async def handle_project_tool(
     script_locked_message: str,
 ) -> bool:
     """Handle Project/Storyboard tools and return whether the name was recognized."""
+    if name == "ask_choices":
+        from ....core.projects.choice_questions import normalize_choice_questions
+
+        questions = normalize_choice_questions(args.get("questions") or args)
+        if not questions:
+            notes.append("ask_choices: need at least one question with two or more options")
+            return True
+        actions.append("ask_choices")
+        notes.append("Waiting for checkbox answers.")
+        if result_payloads is not None:
+            result_payloads.append(
+                {
+                    "ok": True,
+                    "choices": [item.model_dump() for item in questions],
+                }
+            )
+        return True
+
     if name == "set_script":
         if project.script_locked:
             notes.append(f"set_script rejected: {script_locked_message}")
@@ -50,6 +68,54 @@ async def handle_project_tool(
             f"Saved the script ({len(script)} characters). "
             "Review asset coverage or explicitly skip it before storyboarding; "
             "do not jump directly to composition."
+        )
+        return True
+
+    if name == "draft_screenplay":
+        if project.script_locked:
+            notes.append(f"draft_screenplay rejected: {script_locked_message}")
+            return True
+        script = str(args.get("script") or args.get("script_text") or "").strip()
+        if not script:
+            notes.append("draft_screenplay: missing script")
+            return True
+        save_project(
+            project.model_copy(
+                update={
+                    "script_text": script,
+                    "script_locked": False,
+                    "script_draft_pending": True,
+                }
+            )
+        )
+        actions.append("draft_screenplay")
+        notes.append(
+            f"Saved an unlocked screenplay draft ({len(script)} characters). "
+            "Show it for approval. Do not plan shots, cast, or generate until lock_script."
+        )
+        if result_payloads is not None:
+            result_payloads.append(
+                {
+                    "script_draft_pending": True,
+                    "script_locked": False,
+                    "script_chars": len(script),
+                }
+            )
+        return True
+
+    if name == "lock_script":
+        script = (project.script_text or "").strip()
+        if not script:
+            notes.append("lock_script: no screenplay to lock")
+            return True
+        save_project(
+            project.model_copy(
+                update={"script_locked": True, "script_draft_pending": False}
+            )
+        )
+        actions.append("lock_script")
+        notes.append(
+            "Screenplay locked. Shot planning, casting, and H3 may proceed on the next turn."
         )
         return True
 

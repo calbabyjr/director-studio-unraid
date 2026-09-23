@@ -18,14 +18,41 @@ const CLIP_LABEL: Record<SequenceClipStatus, string> = {
   running: "generating",
 };
 
+function sequenceKey(report: SequenceReport): string {
+  return JSON.stringify({
+    clips_ready: report.clips_ready,
+    clips_missing: report.clips_missing,
+    runtime: report.runtime,
+    shots: report.shots.map((shot) => [
+      shot.shot_id,
+      shot.clip_status,
+      shot.clip_job_id,
+      shot.status,
+      shot.title,
+      shot.duration_s,
+    ]),
+    issues: report.issues,
+    assembly: report.last_assembly,
+  });
+}
+
+function applySequenceReport(
+  current: SequenceReport | null,
+  next: SequenceReport,
+): SequenceReport {
+  return current && sequenceKey(current) === sequenceKey(next) ? current : next;
+}
+
 export function SequencePanel({
   projectId,
   active = true,
+  live = false,
   mobile = false,
   onSelectShot,
 }: {
   projectId: string | null;
   active?: boolean;
+  live?: boolean;
   mobile?: boolean;
   onSelectShot?: (shotId: string) => void;
 }) {
@@ -36,53 +63,129 @@ export function SequencePanel({
   const [chainTailFrames, setChainTailFrames] = useState(true);
   const assemblingRef = useRef(false);
   const assembleAttemptRef = useRef("");
+  const wasPollingRef = useRef(false);
 
   const refresh = useCallback(async (id: string) => {
     const next = await getSequence(id);
-    setReport(next);
+    setReport((current) => applySequenceReport(current, next));
     setError(null);
     return next;
   }, []);
 
+  const applyQueue = useCallback((next: ProductionQueue) => {
+    setQueue((current) => (
+      current
+      && current.status === next.status
+      && current.mode === next.mode
+      && current.current_shot_id === next.current_shot_id
+      && current.current_job_id === next.current_job_id
+      && current.error === next.error
+      && current.pending_shot_ids.join("|") === next.pending_shot_ids.join("|")
+        ? current
+        : next
+    ));
+  }, []);
+
   useEffect(() => {
-    if (!active || !projectId) {
-      setReport(null);
-      setError(null);
-      return;
-    }
+    setReport(null);
+    setQueue(null);
+    setError(null);
+    assemblingRef.current = false;
+    assembleAttemptRef.current = "";
+    wasPollingRef.current = false;
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!active || !projectId) return;
     let cancelled = false;
-    const tick = () => {
+    const load = () => {
       getSequence(projectId)
         .then((next) => {
-          if (!cancelled) {
-            setReport(next);
-            setError(null);
-          }
+          if (cancelled) return;
+          setReport((current) => applySequenceReport(current, next));
+          setError(null);
         })
         .catch((err) => {
           if (!cancelled) {
-            setReport(null);
             setError(err instanceof Error ? err.message : String(err));
           }
         });
-    };
-    tick();
-    const timer = window.setInterval(tick, 3000);
-    const pollQueue = () => {
       getProductionQueue(projectId)
         .then((next) => {
-          if (!cancelled) setQueue(next);
+          if (!cancelled) applyQueue(next);
         })
         .catch(() => undefined);
     };
-    pollQueue();
-    const queueTimer = window.setInterval(pollQueue, 4000);
+    load();
+    const onFocus = () => {
+      if (document.visibilityState !== "hidden") load();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
-      window.clearInterval(queueTimer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [active, projectId]);
+  }, [active, applyQueue, projectId]);
+
+  const queueRunning = queue?.status === "running";
+  const clipsRunning = report?.shots.some((shot) => shot.clip_status === "running") ?? false;
+  const pollSequence = Boolean(live || queueRunning || clipsRunning);
+  const pollQueue = Boolean(live || queueRunning);
+
+  useEffect(() => {
+    if (!active || !projectId) return;
+    if (!pollSequence && !pollQueue) {
+      if (!wasPollingRef.current) return;
+      wasPollingRef.current = false;
+      let cancelled = false;
+      getSequence(projectId)
+        .then((next) => {
+          if (cancelled) return;
+          setReport((current) => applySequenceReport(current, next));
+          setError(null);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        });
+      getProductionQueue(projectId)
+        .then((next) => {
+          if (!cancelled) applyQueue(next);
+        })
+        .catch(() => undefined);
+      return () => {
+        cancelled = true;
+      };
+    }
+    wasPollingRef.current = true;
+    let cancelled = false;
+    const tickSequence = () => {
+      getSequence(projectId)
+        .then((next) => {
+          if (cancelled) return;
+          setReport((current) => applySequenceReport(current, next));
+          setError(null);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        });
+    };
+    const tickQueue = () => {
+      getProductionQueue(projectId)
+        .then((next) => {
+          if (!cancelled) applyQueue(next);
+        })
+        .catch(() => undefined);
+    };
+    const sequenceTimer = pollSequence ? window.setInterval(tickSequence, 3000) : 0;
+    const queueTimer = pollQueue ? window.setInterval(tickQueue, 4000) : 0;
+    return () => {
+      cancelled = true;
+      if (sequenceTimer) window.clearInterval(sequenceTimer);
+      if (queueTimer) window.clearInterval(queueTimer);
+    };
+  }, [active, applyQueue, pollQueue, pollSequence, projectId]);
 
   const onAssemble = async () => {
     if (!projectId || busy) return;
@@ -141,6 +244,23 @@ export function SequencePanel({
               : "Runtime, continuity, and rough cut"}
           </p>
         </div>
+        {queue?.status === "running" ? (
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={() => {
+              if (!projectId) return;
+              void cancelProductionQueue(projectId)
+                .then(setQueue)
+                .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            }}
+          >
+            Stop queue
+          </button>
+        ) : null}
+      </div>
+      <details className="cut-drawer" open={queue?.status === "running" || undefined}>
+        <summary aria-label="Cut tools">Cut</summary>
         <div className="sequence-actions">
           <button
             type="button"
@@ -178,20 +298,6 @@ export function SequencePanel({
           >
             Run remaining
           </button>
-          {queue?.status === "running" ? (
-            <button
-              type="button"
-              className="btn ghost sm"
-              onClick={() => {
-                if (!projectId) return;
-                void cancelProductionQueue(projectId)
-                  .then(setQueue)
-                  .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-              }}
-            >
-              Stop queue
-            </button>
-          ) : null}
           <button
             type="button"
             className="btn primary sm"
@@ -210,16 +316,15 @@ export function SequencePanel({
             Shot list
           </a>
         </div>
-      </div>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={chainTailFrames}
-          disabled={busy || queue?.status === "running"}
-          onChange={(event) => setChainTailFrames(event.target.checked)}
-        />
-        <span>Chain tail frame into next shot</span>
-      </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={chainTailFrames}
+            disabled={busy || queue?.status === "running"}
+            onChange={(event) => setChainTailFrames(event.target.checked)}
+          />
+          <span>Chain tail frame into next shot</span>
+        </label>
 
       {queue?.status === "running" ? (
         <p className="muted tiny" role="status">
@@ -237,27 +342,6 @@ export function SequencePanel({
           New clips since the last rough cut
           {readyJobIds.length ? ` · ${readyJobIds.length} ready` : ""}. Updating…
         </p>
-      ) : null}
-
-      {report?.last_assembly ? (
-        <div className="sequence-assembly">
-          <video
-            className="sequence-assembly-video"
-            src={`${report.last_assembly.url}?t=${encodeURIComponent(report.last_assembly.created_at)}`}
-            controls
-            playsInline
-            aria-label="Rough cut"
-          />
-          <p className="muted tiny">
-            Rough cut
-            {report.last_assembly.duration_s
-              ? ` · ${Math.round(report.last_assembly.duration_s)}s`
-              : ""}
-            {report.last_assembly.missing_shot_ids.length
-              ? ` · skipped ${report.last_assembly.missing_shot_ids.length} shot(s) without clips`
-              : ""}
-          </p>
-        </div>
       ) : null}
 
       {report?.shots.length ? (
@@ -298,6 +382,28 @@ export function SequencePanel({
         </ul>
       ) : report && report.shot_count > 0 ? (
         <p className="muted tiny">No continuity flags on the current cut.</p>
+      ) : null}
+      </details>
+
+      {report?.last_assembly ? (
+        <div className="sequence-assembly">
+          <video
+            className="sequence-assembly-video"
+            src={`${report.last_assembly.url}?t=${encodeURIComponent(report.last_assembly.created_at)}`}
+            controls
+            playsInline
+            aria-label="Rough cut"
+          />
+          <p className="muted tiny">
+            Rough cut
+            {report.last_assembly.duration_s
+              ? ` · ${Math.round(report.last_assembly.duration_s)}s`
+              : ""}
+            {report.last_assembly.missing_shot_ids.length
+              ? ` · skipped ${report.last_assembly.missing_shot_ids.length} shot(s) without clips`
+              : ""}
+          </p>
+        </div>
       ) : null}
     </section>
   );

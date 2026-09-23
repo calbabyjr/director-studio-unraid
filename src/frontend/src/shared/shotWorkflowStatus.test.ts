@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Shot } from "./api/types";
-import { shotWorkflowStatus } from "./shotWorkflowStatus";
+import { firstActionableShotId, shotWorkflowStatus } from "./shotWorkflowStatus";
 
 function succeededShot(meta: Record<string, unknown>): Shot {
   return {
@@ -120,5 +120,24 @@ describe("shotWorkflowStatus", () => {
     };
 
     expect(shotWorkflowStatus(shot)).toEqual({ key: "needs-prompt", label: "Needs prompt" });
+  });
+
+  it("prefers the first shot that is not H3 succeeded", () => {
+    const done = succeededShot({ material_review_pending: false });
+    const needs = succeededShot({ material_review_pending: false });
+    needs.id = "sht_needs";
+    needs.h3_job_id = null;
+    needs.status = "draft";
+    needs.prompt_sections = {
+      subject_definitions: "",
+      summary: "",
+      retention_analysis: "",
+      detailed_description: "",
+      overall_soundscape: "",
+      non_diegetic_music: "",
+    };
+    expect(firstActionableShotId([done, needs])).toBe("sht_needs");
+    expect(firstActionableShotId([done])).toBe("sht_status");
+    expect(firstActionableShotId([])).toBeNull();
   });
 });

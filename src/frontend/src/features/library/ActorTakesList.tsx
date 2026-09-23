@@ -53,29 +53,33 @@ export function ActorTakesList({
 
   return (
     <div className="takes-list" aria-label="Actor takes">
-      <strong>Takes</strong>
+      <div className="takes-list-head">
+        <strong>Takes</strong>
+        <span className="muted tiny">{takes.length ? `${takes.length}` : "None"}</span>
+      </div>
       <p className="muted tiny">Pin copies a generation’s outputs onto this actor.</p>
       {error ? <p className="field-error">{error}</p> : null}
       {takes.length === 0 && !error ? (
         <p className="muted tiny">No generation takes yet.</p>
       ) : (
-        takes.map((take) => (
-          <div key={take.id} className="takes-list-item muted tiny">
-            <code>{take.id}</code> · {take.status}
-            {take.pinned ? (
-              " · pinned"
-            ) : take.status === "succeeded" ? (
-              <button
-                type="button"
-                className="btn ghost sm"
-                disabled={busy || pinningId != null}
-                onClick={() => void onPin(take.id)}
-              >
-                {pinningId === take.id ? "Pinning…" : "Pin"}
-              </button>
-            ) : null}
-          </div>
-        ))
+        <div className="takes-list-items">
+          {takes.map((take) => (
+            <div key={take.id} className="takes-list-item muted tiny">
+              <code title={take.id}>{take.id}</code>
+              <span>{take.status}{take.pinned ? " · pinned" : ""}</span>
+              {!take.pinned && take.status === "succeeded" ? (
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  disabled={busy || pinningId != null}
+                  onClick={() => void onPin(take.id)}
+                >
+                  {pinningId === take.id ? "Pinning…" : "Pin"}
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

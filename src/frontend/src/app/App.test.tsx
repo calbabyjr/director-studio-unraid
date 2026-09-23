@@ -292,7 +292,7 @@ describe("App mode routing", () => {
       "mobile-json-production-page",
     );
     expect(screen.queryByRole("navigation", { name: "Mobile workspace" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Asset" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Assets" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Director" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Production" })).toBeNull();
     expect(screen.queryByTestId("production-page")).toBeNull();
@@ -396,13 +396,13 @@ describe("App mode routing", () => {
     expect(header.querySelectorAll(":scope > .mobile-topbar-row")).toHaveLength(2);
     expect(header.querySelector(".mobile-workspace-nav")).toBeTruthy();
     expect(document.querySelector(".mobile-tabbar")).toBeNull();
-    expect(screen.getByRole("button", { name: "Asset" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Assets" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Director" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Production" })).toBeTruthy();
     expect(screen.getByTestId("director-page").dataset.mobile).toBe("true");
-    expect(screen.getByTestId("director-page").dataset.chatOnly).toBe("true");
+    expect(screen.getByTestId("director-page").dataset.chatOnly).toBe("false");
 
-    fireEvent.click(screen.getByRole("button", { name: "Asset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Assets" }));
     expect(screen.getByTestId("mobile-asset-workspace")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Production" }));
@@ -413,12 +413,12 @@ describe("App mode routing", () => {
     window.history.replaceState({}, "", "/mobile");
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Asset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Assets" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Mobile workspace draft" }), {
       target: { value: "Do not discard this input" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Director" }));
-    fireEvent.click(screen.getByRole("button", { name: "Asset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Assets" }));
 
     expect((screen.getByRole("textbox", { name: "Mobile workspace draft" }) as HTMLInputElement).value).toBe("Do not discard this input");
   });
