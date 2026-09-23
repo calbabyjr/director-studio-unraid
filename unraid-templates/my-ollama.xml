@@ -19,7 +19,7 @@
   <ExtraParams>--runtime=nvidia --gpus '"device=GPU-d367c22f-0b56-08a5-fe77-3ef6fe84596b"' --memory=32G</ExtraParams>
   <PostArgs/>
   <CPUset/>
-  <DateInstalled>1789863407</DateInstalled>
+  <DateInstalled>1790201513</DateInstalled>
   <DonateText/>
   <DonateLink/>
   <Requires>**Nvidia Driver plugin** (nVidia Support)</Requires>
@@ -34,5 +34,6 @@
   <Config Name="OLLAMA_CONTEXT_LENGTH" Target="OLLAMA_CONTEXT_LENGTH" Default="16384" Mode="" Description="Default num_ctx when a model loads. Director uses 32768." Type="Variable" Display="always" Required="false" Mask="false">32768</Config>
   <Config Name="OLLAMA_NUM_PARALLEL" Target="OLLAMA_NUM_PARALLEL" Default="" Mode="" Description="One 32k slot on 16GB. Two slots will OOM or steal the 4070." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
   <Config Name="OLLAMA_MAX_LOADED_MODELS" Target="OLLAMA_MAX_LOADED_MODELS" Default="" Mode="" Description="Keep a single resident model so Director does not dual-load 9Bs." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
+  <Config Name="OLLAMA_KV_CACHE_TYPE" Target="OLLAMA_KV_CACHE_TYPE" Default="" Mode="" Description="8-bit KV cache so the 27B Fable + vision fits the 5060 Ti at 32K ctx." Type="Variable" Display="always" Required="false" Mask="false">q8_0</Config>
   <TailscaleStateDir/>
 </Container>
