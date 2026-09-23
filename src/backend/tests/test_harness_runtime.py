@@ -956,7 +956,7 @@ async def test_chat_falls_back_to_empty_history_when_retry_still_cannot_compact(
             calls.append(body)
             if len(calls) < 3:
                 raise HarnessError(
-                    "Harness COMPACTION_FAILED: summary is not smaller than the shadowed content (1159 estimated framed tokens >= 1159). Original history is preserved.",
+                    "Harness COMPACTION_FAILED: summary is not smaller than the shadowed content (11590 estimated framed tokens >= 11590). Original history is preserved.",
                     code="COMPACTION_FAILED",
                 )
             return {"reply": "fresh", "thinking": ""}
@@ -1277,7 +1277,8 @@ async def test_nonstream_chat_reserves_project_and_cancels(tmp_projects_dir, mon
         ("Harness COMPACTION_FAILED: History compaction failed: GPU busy: comfy. Original history is preserved.", True),
         ("Harness COMPACTION_FAILED: History compaction failed: Request timed out. Original history is preserved.", True),
         ("Harness COMPACTION_FAILED: History compaction failed: summarization truncated at the token cap (incomplete checkpoint). Original history is preserved.", False),
-        ("Harness COMPACTION_FAILED: summary is not smaller than the shadowed content (1013 estimated framed tokens >= 1013)", False),
+        ("Harness COMPACTION_FAILED: summary is not smaller than the shadowed content (1013 estimated framed tokens >= 1013)", True),
+        ("Harness COMPACTION_FAILED: summary is not smaller than the shadowed content (9120 estimated framed tokens >= 9120)", False),
     ],
 )
 def test_only_session_size_compaction_failures_retire_the_session(message, transient):

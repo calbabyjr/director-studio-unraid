@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator
 
+from ...config import settings
 from ...core.projects.layouts import LayoutBrief, RefRole
 from ...core.projects.models import Shot
 from .skill_loader import with_director_skill
@@ -328,7 +329,7 @@ async def analyze_ref_frame(
         images=ollama_images,
         require_vision=True,
         keep_alive="10m",
-        options={"temperature": 0.1, "num_ctx": 8192},
+        options={"temperature": 0.1, "num_ctx": settings.director_num_ctx},
         format=VisualBrief.model_json_schema(),
     )
     brief = parse_visual_brief(response)
@@ -342,7 +343,7 @@ async def analyze_ref_frame(
                     guides=("reference-strategy", "reference-frame-generation"),
                 ),
                 keep_alive="10m",
-                options={"temperature": 0.0, "num_ctx": 8192},
+                options={"temperature": 0.0, "num_ctx": settings.director_num_ctx},
                 format=GenerationPromptRepair.model_json_schema(),
             )
             repaired_payload = json.loads(_json_object(repaired_response))

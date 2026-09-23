@@ -622,8 +622,18 @@ _SESSION_TOO_LARGE_MARKERS = (
 )
 
 
+# "summary is not smaller than the shadowed content (N ...)" with a small N
+# means the history is too SHORT to shrink: the fixed envelope, not the
+# session, is filling the window. Archiving the session cannot help then.
+_SMALL_SHADOWED_TOKENS = 4000
+_SHADOWED = re.compile(r"shadowed content \((\d+) estimated")
+
+
 def _compaction_failure_transient(exc: HarnessError) -> bool:
     text = str(exc)
+    shadowed = _SHADOWED.search(text)
+    if shadowed and int(shadowed.group(1)) < _SMALL_SHADOWED_TOKENS:
+        return True
     return not any(marker in text for marker in _SESSION_TOO_LARGE_MARKERS)
 
 
