@@ -2353,7 +2353,7 @@ def test_submit_refreshes_prompt_when_layout_provenance_is_stale(
     ) -> str:
         import json
 
-        assert tuple(guides) == ("h3-prompt-writing",)
+        assert tuple(guides)[:1] == ("h3-prompt-writing",)
         return json.dumps(fresh_sections)
 
     monkeypatch.setattr(provider, "complete", return_fresh_sections)

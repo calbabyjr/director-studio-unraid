@@ -186,3 +186,22 @@ async def test_project_chat_loads_director_skill_before_ollama(
     assert len(prompts) == 1
     assert "DIRECTOR CONTRACT CHAT_RULES" in prompts[0]
     assert prompts[0].index("DIRECTOR CONTRACT") < prompts[0].index("CHAT SYSTEM")
+
+
+def test_craft_guides_follow_the_request_and_are_capped():
+    from app.agents.director.stage_guides import MAX_CRAFT_GUIDES, craft_guides_for_message
+
+    assert craft_guides_for_message("Generate the Layout for Shot 1, dungeon well lit") == (
+        "cinematography", "lighting-color", "blocking-continuity",
+    )
+    assert craft_guides_for_message("Draft the screenplay from my premise") == ("scene-craft",)
+    assert craft_guides_for_message("Add rain ambience and no music") == ("sound-design",)
+    assert craft_guides_for_message("thanks!") == ()
+    assert len(craft_guides_for_message("shot light blocking storyboard script sound")) == MAX_CRAFT_GUIDES
+
+
+def test_craft_guides_load_as_stage_blocks():
+    for guide_id in ("cinematography", "lighting-color", "blocking-continuity",
+                     "coverage-editing", "scene-craft", "sound-design"):
+        block = stage_guides.load_stage_guides((guide_id,))
+        assert block.startswith(f'<DIRECTOR_STAGE_GUIDE id="{guide_id}">')

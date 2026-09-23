@@ -324,7 +324,7 @@ async def analyze_ref_frame(
                 review_image_used=review_image is not None,
                 feedback=feedback,
             ),
-            guides=("reference-strategy", "reference-frame-generation"),
+            guides=("reference-strategy", "reference-frame-generation", "cinematography", "lighting-color", "blocking-continuity"),
         ),
         images=ollama_images,
         require_vision=True,
@@ -340,7 +340,7 @@ async def analyze_ref_frame(
                 model,
                 with_director_skill(
                     _generation_prompt_repair_prompt(brief, captions, missing_refs),
-                    guides=("reference-strategy", "reference-frame-generation"),
+                    guides=("reference-strategy", "reference-frame-generation", "cinematography", "lighting-color", "blocking-continuity"),
                 ),
                 keep_alive="10m",
                 options={"temperature": 0.0, "num_ctx": settings.director_num_ctx},

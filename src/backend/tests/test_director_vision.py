@@ -191,9 +191,9 @@ async def test_image_backed_review_uses_visual_qc_but_ordinary_chat_uses_no_guid
         chat_fn=recording_chat_fn,
     )
 
-    assert calls[0]["guides"] == ("visual-qc",)
+    assert calls[0]["guides"][:1] == ("visual-qc",)
     assert calls[0]["images"]
-    assert calls[1].get("guides", ()) == ()
+    assert "visual-qc" not in calls[1].get("guides", ())
     assert "images" not in calls[1]
 
 
@@ -221,7 +221,7 @@ async def test_user_uploaded_images_are_sent_directly_to_the_visual_agent(
     )
 
     assert calls[0]["images"] == ["encoded-user-image"]
-    assert calls[0]["guides"] == ("visual-qc",)
+    assert calls[0]["guides"][:1] == ("visual-qc",)
     assert "User-uploaded image 1: blocking.png" in calls[0]["user"]
 
 

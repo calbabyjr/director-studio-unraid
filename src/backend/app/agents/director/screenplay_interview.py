@@ -115,7 +115,7 @@ async def _complete(system: str, user: str) -> str:
     keep = bool(getattr(settings, "llm_keep_loaded", True))
     async with orch.llm_session(release_on_exit=not keep, fail_if_generation_pending=True):
         await orch.ensure_llm_ready()
-        return await provider.complete(system, user, guides=("script-planning",))
+        return await provider.complete(system, user, guides=("script-planning", "scene-craft"))
 
 
 def _parse_interview_reply(raw: str) -> tuple[str, bool, str, list[ChoiceQuestion]]:

@@ -1640,7 +1640,7 @@ async def test_native_save_storyboard_real_service_returns_the_stored_snapshot(
 
         async def complete(self, system, user, *, guides=()):
             self.calls.append((system, user, tuple(guides)))
-            if tuple(guides) != ("storyboard-validation",):
+            if tuple(guides)[:1] != ("storyboard-validation",):
                 raise AssertionError("save_storyboard must not invoke legacy planning")
             return json.dumps({"valid": True, "issues": []})
 
@@ -1738,7 +1738,7 @@ async def test_native_save_storyboard_real_service_returns_the_stored_snapshot(
     assert stored[0].script_beat == beat
     assert stored[0].dialogue == ["Do not open the archive door."]
     assert len(provider.calls) == 1
-    assert provider.calls[0][2] == ("storyboard-validation",)
+    assert provider.calls[0][2] == ("storyboard-validation", "blocking-continuity")
     assert result.actions == ["llm", "save_storyboard"]
     assert result.reply == "Storyboard saved: 1 shot."
     assert [shot.id for shot in result.shots] == [shot.id for shot in stored]
@@ -3206,7 +3206,8 @@ async def test_locked_project_omits_set_script_on_every_native_turn_and_rejects_
         not in {tool["function"]["name"] for tool in call["tools"]}
         for call in calls
     )
-    assert all(call["guides"] == ("script-planning",) for call in calls)
+    # Film-craft guides follow the request; the stage guide stays first.
+    assert all(call["guides"][:1] == ("script-planning",) for call in calls)
     assert replay_result["ok"] is False
     assert replay_result["tool_name"] == "set_script"
     assert replay_result["save_storyboard_submissions"] == 0

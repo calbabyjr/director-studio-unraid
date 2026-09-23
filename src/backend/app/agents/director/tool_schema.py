@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 from ...config import settings
 from ...core.projects.models import AssetCoverageReviewSubmission, Project
+from .stage_guides import craft_guides_for_message
 from .intent import (
     actor_design_intent,
     ask_choices_intent,
@@ -847,6 +848,7 @@ def director_chat_guides(
         guides.append("visual-qc")
     if sequence_review_intent(current_message):
         guides.append("sequence-assembly")
+    guides.extend(craft_guides_for_message(current_message))
     return tuple(guides)
 
 

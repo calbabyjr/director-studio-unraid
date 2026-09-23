@@ -535,8 +535,8 @@ async def test_plan_and_h3_writer_request_different_guides(director_dirs, enable
     enable_reference_review(provider)
     await svc.write_prompts_after_layout(shot.id)
 
-    assert provider.calls[0].guides == ("script-planning",)
-    assert provider.calls[-1].guides == ("h3-prompt-writing",)
+    assert provider.calls[0].guides == ("script-planning", "coverage-editing", "cinematography")
+    assert provider.calls[-1].guides == ("h3-prompt-writing", "cinematography", "lighting-color", "sound-design")
     h3_user = provider.calls[-1].user
     assert f"- shot_type: {CAMERA_DRAFT['shot_type']}" in h3_user
     assert f"- camera_angle: {CAMERA_DRAFT['camera_angle']}" in h3_user
@@ -593,7 +593,7 @@ async def test_visual_direction_loads_reference_guides(monkeypatch):
     )
 
     assert captured == [
-        ("reference-strategy", "reference-frame-generation")
+        ("reference-strategy", "reference-frame-generation", "cinematography", "lighting-color", "blocking-continuity")
     ]
 
 
@@ -762,8 +762,8 @@ async def test_save_storyboard_persists_exact_ordered_drafts_without_calling_pla
         ("scene", scene.id, "master", 2),
     ]
     assert len(provider.calls) == 1
-    assert provider.calls[0].guides == ("storyboard-validation",)
-    assert not any(call.guides == ("script-planning",) for call in provider.calls)
+    assert provider.calls[0].guides == ("storyboard-validation", "blocking-continuity")
+    assert not any(call.guides[:1] == ("script-planning",) for call in provider.calls)
     from app.core.library.store import load_asset
 
     assert load_asset("actors", actor.id).project_id == project.id
@@ -1275,7 +1275,7 @@ async def test_save_storyboard_semantic_rejection_receives_complete_grounding_an
 
     assert len(provider.calls) == 1
     call = provider.calls[0]
-    assert call.guides == ("storyboard-validation",)
+    assert call.guides == ("storyboard-validation", "blocking-continuity")
     assert screenplay in call.user
     assert feedback in call.user
     assert "12.0" in call.user

@@ -749,7 +749,7 @@ class DirectorService:
             raw_validation = await self.plan_provider.complete(
                 prompt_text.STORYBOARD_VALIDATION_SYSTEM,
                 validation_user,
-                guides=("storyboard-validation",),
+                guides=("storyboard-validation", "blocking-continuity"),
             )
         try:
             validation = parse_storyboard_validation(raw_validation)
@@ -797,7 +797,7 @@ class DirectorService:
             raw = await self.plan_provider.complete(
                 system,
                 user,
-                guides=("script-planning",),
+                guides=("script-planning", "coverage-editing", "cinematography"),
             )
             drafts: list[ShotDraft] | None = None
             try:
@@ -818,7 +818,7 @@ class DirectorService:
                 raw2 = await self.plan_provider.complete(
                     prompt_text.PLAN_REPAIR_SYSTEM,
                     repair_user,
-                    guides=("script-planning",),
+                    guides=("script-planning", "coverage-editing", "cinematography"),
                 )
                 try:
                     drafts = parse_shot_drafts(raw2)
@@ -1878,7 +1878,7 @@ class DirectorService:
                         "Return one concise paragraph describing what the Layout visibly establishes."
                     ),
                     images=[encoded],
-                    guides=("h3-prompt-writing",),
+                    guides=("h3-prompt-writing", "cinematography", "lighting-color", "sound-design"),
                 )
                 cleaned = str(analysis or "").strip()
                 if cleaned:
@@ -1991,7 +1991,7 @@ class DirectorService:
                     preserve_prompt = False
             check_current()
             raw = shot.prompt_sections.model_dump_json() if preserve_prompt else await self.plan_provider.complete(
-                prompt_text.H3_PROMPT_INSTRUCTIONS, user, guides=("h3-prompt-writing",),
+                prompt_text.H3_PROMPT_INSTRUCTIONS, user, guides=("h3-prompt-writing", "cinematography", "lighting-color", "sound-design"),
             )
             required_layout_indices = [
                 int(item["picture_index"]) for item in selected_layouts
@@ -2044,7 +2044,7 @@ class DirectorService:
                 raw2 = await self.plan_provider.complete(
                     prompt_text.H3_PROMPT_INSTRUCTIONS,
                     repair,
-                    guides=("h3-prompt-writing",),
+                    guides=("h3-prompt-writing", "cinematography", "lighting-color", "sound-design"),
                 )
                 try:
                     prompt_sections = parse_and_validate(raw2)
