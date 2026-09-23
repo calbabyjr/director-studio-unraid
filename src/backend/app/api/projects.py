@@ -140,7 +140,11 @@ def _generation_active_http(error: GenerationActiveError) -> HTTPException:
 async def _assert_chat_available() -> None:
     from ..core.vram import get_orchestrator
 
-    reservations = await get_orchestrator().generation_reservations()
+    orch = get_orchestrator()
+    # Only exclusive VRAM shares one GPU between the LLM and Comfy.
+    if not getattr(orch, "generation_blocks_llm", True):
+        return
+    reservations = await orch.generation_reservations()
     if reservations:
         raise GenerationActiveError(reservations)
 

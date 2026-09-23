@@ -170,6 +170,21 @@ class VramOrchestrator:
         async with self._cv:
             return self._generation_snapshot_unlocked()
 
+    @property
+    def generation_blocks_llm(self) -> bool:
+        """Only exclusive VRAM makes a local generation block Director inference.
+
+        Under ``shared`` the LLM and Comfy run on different GPUs, so chat
+        admission must not wait for image/video jobs.
+        """
+        return (self.policy or "exclusive") == "exclusive"
+
+    async def llm_blocking_reservations(self) -> list[GenerationReservation]:
+        """Generation reservations that should refuse a new Director turn."""
+        if not self.generation_blocks_llm:
+            return []
+        return await self.generation_reservations()
+
     def _get_comfy(self) -> ComfyFreeClient:
         if self.comfy is not None:
             return self.comfy
@@ -384,10 +399,7 @@ class VramOrchestrator:
         if (self.policy or "exclusive") != "exclusive":
             logger.info("shared VRAM policy: LLM session will not unload Comfy")
             async with self._cv:
-                if fail_if_generation_pending:
-                    reservations = self._generation_snapshot_unlocked()
-                    if reservations:
-                        raise GenerationActiveError(reservations)
+                # Separate GPUs: queued/running generations never block the LLM.
                 self.owner = "llm"
             try:
                 yield self

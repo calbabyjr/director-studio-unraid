@@ -402,6 +402,30 @@ async def test_chat_llm_session_fails_without_warming_ollama_when_reserved():
 
 
 @pytest.mark.asyncio
+async def test_shared_policy_chat_runs_while_generation_is_reserved():
+    ollama = FakeOllama()
+    orch = VramOrchestrator(
+        ollama=ollama, comfy=FakeComfy(), models=["qwen-plan"],
+        policy="shared", acquire_timeout_sec=5.0,
+    )
+    await orch.reserve_generation(
+        job_id="job_video",
+        pipeline_id="h3_ref2va",
+        kind="video",
+        status="running",
+        phase="generating",
+        queued_at="2026-08-31T10:00:00+00:00",
+    )
+
+    # LLM and Comfy live on different GPUs: a generation must not refuse chat.
+    async with orch.llm_session(fail_if_generation_pending=True):
+        pass
+    assert orch.generation_blocks_llm is False
+    assert await orch.llm_blocking_reservations() == []
+    assert _orch().generation_blocks_llm is True
+
+
+@pytest.mark.asyncio
 async def test_comfy_does_not_start_when_local_lifecycle_release_fails():
     provider = FakeProvider(FailingLocalLifecycle(), provider_id="lm-studio")
     orch = VramOrchestrator(

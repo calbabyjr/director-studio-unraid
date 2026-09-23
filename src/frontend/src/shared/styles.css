@@ -959,6 +959,82 @@ code {
   line-height: 1;
 }
 
+.chat-queue {
+  padding: 0.5rem 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.chat-queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.chat-queue-paused {
+  color: var(--danger);
+}
+
+.chat-queue-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.chat-queue-list {
+  display: grid;
+  gap: 0.3rem;
+  max-height: 7.5rem;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.chat-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.35rem 0.3rem 0.6rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 9px;
+  background: var(--bg-panel);
+  font-size: 0.8rem;
+}
+
+.chat-queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-queue-images {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.chat-queue-item button {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.chat-queue-item button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .chat-composer textarea {
   flex: 1;
   resize: vertical;
@@ -6256,6 +6332,7 @@ select {
 
 .director-chat-thread .chat-chips,
 .director-chat-thread .chat-attachment-tray,
+.director-chat-thread .chat-queue,
 .director-chat-thread .chat-composer {
   flex-shrink: 0;
 }
@@ -6515,6 +6592,7 @@ select {
 
 .director-chat-panel .chat-chips,
 .director-chat-panel .chat-attachment-tray,
+.director-chat-panel .chat-queue,
 .director-chat-panel .chat-composer,
 .director-chat-panel .director-work-banner,
 .director-chat-panel .director-generation-status,

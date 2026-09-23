@@ -111,7 +111,7 @@ async def refresh_pending_reviews(svc=None) -> list[str]:
     for shot in _due_shots():
         # Re-check just before each review: a batch can take many minutes, and
         # a user generation or chat may have started meanwhile.
-        if await get_orchestrator().generation_reservations():
+        if await get_orchestrator().llm_blocking_reservations():
             break
         if director_chat_sessions.is_active(shot.project_id):
             continue

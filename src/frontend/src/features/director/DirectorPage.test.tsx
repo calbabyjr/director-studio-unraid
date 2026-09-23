@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project, ProjectDetail, ProjectMode, Shot } from "../../shared/api/types";
@@ -403,7 +404,7 @@ describe("Director shot actions", () => {
     expect(screen.queryByRole("button", { name: "Retry prompt" })).toBeNull();
   });
 
-  it("replaces Send with Cancel and disables the composer during a local response", async () => {
+  it("replaces Send with Queue and Cancel and keeps the composer editable during a local response", async () => {
     const action = deferred<Awaited<ReturnType<typeof chatWithDirectorStream>>>();
     vi.mocked(chatWithDirectorStream).mockReturnValueOnce(action.promise);
     render(<DirectorPage />);
@@ -415,7 +416,9 @@ describe("Director shot actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(await screen.findByRole("button", { name: "Cancel" })).toBeTruthy();
-    expect((screen.getByPlaceholderText(/Talk to the Director/) as HTMLTextAreaElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Queue" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect((screen.getByPlaceholderText(/Talk to the Director/) as HTMLTextAreaElement).disabled).toBe(false);
     expect((screen.getByLabelText("Add images") as HTMLInputElement).disabled).toBe(true);
   });
 
@@ -467,7 +470,7 @@ describe("Director shot actions", () => {
 
     expect(screen.getByText("LLM busy — response is still running")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
-    expect((screen.getByPlaceholderText(/Talk to the Director/) as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByPlaceholderText(/Talk to the Director/) as HTMLTextAreaElement).disabled).toBe(false);
 
     await act(async () => {
       vi.advanceTimersByTime(1500);
@@ -590,7 +593,7 @@ describe("Director shot actions", () => {
     );
   });
 
-  it("locks the composer and advances generation time locally", async () => {
+  it("queues from the composer and advances generation time locally", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-31T10:02:37Z"));
     vi.mocked(getDirectorVramStatus).mockResolvedValue({
@@ -632,10 +635,12 @@ describe("Director shot actions", () => {
     });
 
     expect(screen.getByText("Generating video · H3 video · 02:37 · 2 jobs waiting")).toBeTruthy();
-    expect((screen.getByPlaceholderText(/Talk to the Director/) as HTMLTextAreaElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByPlaceholderText(/Talk to the Director/) as HTMLTextAreaElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Queue" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     expect((screen.getByLabelText("Add images") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Project status" }) as HTMLButtonElement).disabled).toBe(true);
+    // Canned quick actions enqueue while locked instead of being disabled.
+    expect((screen.getByRole("button", { name: "Project status" }) as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByTitle(/model used for Director chat/i) as HTMLSelectElement).disabled).toBe(true);
     expect((screen.getByLabelText("Note scope") as HTMLSelectElement).disabled).toBe(true);
     expect(getDirectorVramStatus).toHaveBeenCalledTimes(1);
@@ -1313,5 +1318,132 @@ describe("Director shot actions", () => {
 
     await act(async () => { vi.advanceTimersByTime(2500); await Promise.resolve(); await Promise.resolve(); });
     expect(screen.queryByText("Could not refresh Layout status: refresh offline")).toBeNull();
+  });
+});
+
+describe("Director chat queue", () => {
+  const reply = (text: string) => ({
+    reply: text, actions: [], project: projectState.project!,
+    shots: [testShot], images: [], thinking: "", steps: [],
+  });
+
+  const typeAndClick = (text: string, button: "Send" | "Queue") => {
+    fireEvent.change(screen.getByPlaceholderText(/Talk to the Director/), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: button }));
+  };
+
+  const sentMessages = () => vi.mocked(chatWithDirectorStream).mock.calls.map((call) => call[1]);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(chatWithDirectorStream).mockReset();
+    localStorage.clear();
+    Element.prototype.scrollIntoView = vi.fn();
+    projectState.projectId = "prj_test";
+    getDirectorChatHistoryMock.mockResolvedValue([]);
+    vi.mocked(getDirectorChatSession).mockResolvedValue({ active: false, session_id: null, started_at: null });
+    vi.mocked(getDirectorVramStatus).mockResolvedValue({ chat_locked: false, generation_count: 0, generation_jobs: [] });
+    vi.mocked(getProject).mockResolvedValue({ project: projectState.project!, shots: [testShot] });
+  });
+
+  afterEach(() => {
+    cleanup();
+    localStorage.clear();
+  });
+
+  it("queues a typed message while a turn is running and clears the draft", async () => {
+    const first = deferred<Awaited<ReturnType<typeof chatWithDirectorStream>>>();
+    vi.mocked(chatWithDirectorStream).mockReturnValueOnce(first.promise);
+    render(<DirectorPage />);
+    await screen.findByRole("heading", { name: "1. Corridor walk-in" });
+
+    typeAndClick("Plan it", "Send");
+    await screen.findByRole("button", { name: "Cancel" });
+    typeAndClick("Then tighten shot 2", "Queue");
+
+    expect(await screen.findByText("Queued (1)")).toBeTruthy();
+    expect(screen.getByText("Then tighten shot 2")).toBeTruthy();
+    expect((screen.getByPlaceholderText(/Talk to the Director/) as HTMLTextAreaElement).value).toBe("");
+    expect(sentMessages()).toEqual(["Plan it"]);
+    expect(JSON.parse(localStorage.getItem("ds.directorChatQueue.prj_test") || "[]")).toEqual([
+      expect.objectContaining({ text: "Then tighten shot 2" }),
+    ]);
+  });
+
+  it("removes a queued message before it is sent", async () => {
+    const first = deferred<Awaited<ReturnType<typeof chatWithDirectorStream>>>();
+    vi.mocked(chatWithDirectorStream).mockReturnValueOnce(first.promise);
+    render(<DirectorPage />);
+    await screen.findByRole("heading", { name: "1. Corridor walk-in" });
+
+    typeAndClick("Plan it", "Send");
+    await screen.findByRole("button", { name: "Cancel" });
+    typeAndClick("Never mind this one", "Queue");
+    fireEvent.click(await screen.findByRole("button", { name: /Remove queued message: Never mind/ }));
+
+    expect(screen.queryByText("Never mind this one")).toBeNull();
+    expect(screen.queryByText(/Queued \(/)).toBeNull();
+    expect(localStorage.getItem("ds.directorChatQueue.prj_test")).toBeNull();
+
+    await act(async () => { first.resolve(reply("Planned")); });
+    await screen.findByText("Planned");
+    expect(sentMessages()).toEqual(["Plan it"]);
+  });
+
+  it("dispatches queued messages one at a time after each turn completes", async () => {
+    const first = deferred<Awaited<ReturnType<typeof chatWithDirectorStream>>>();
+    const second = deferred<Awaited<ReturnType<typeof chatWithDirectorStream>>>();
+    const third = deferred<Awaited<ReturnType<typeof chatWithDirectorStream>>>();
+    vi.mocked(chatWithDirectorStream)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+      .mockReturnValueOnce(third.promise);
+    render(<StrictMode><DirectorPage /></StrictMode>);
+    await screen.findByRole("heading", { name: "1. Corridor walk-in" });
+
+    typeAndClick("First", "Send");
+    await screen.findByRole("button", { name: "Cancel" });
+    typeAndClick("Second", "Queue");
+    typeAndClick("Third", "Queue");
+    expect(await screen.findByText("Queued (2)")).toBeTruthy();
+
+    await act(async () => { first.resolve(reply("Reply one")); });
+    await waitFor(() => expect(sentMessages()).toEqual(["First", "Second"]));
+    expect(await screen.findByText("Queued (1)")).toBeTruthy();
+    // Third waits for Second's turn to finish.
+    await act(async () => { await Promise.resolve(); });
+    expect(sentMessages()).toEqual(["First", "Second"]);
+
+    await act(async () => { second.resolve(reply("Reply two")); });
+    await waitFor(() => expect(sentMessages()).toEqual(["First", "Second", "Third"]));
+    expect(screen.queryByText(/Queued \(/)).toBeNull();
+
+    await act(async () => { third.resolve(reply("Reply three")); });
+    await screen.findByText("Reply three");
+    expect(sentMessages()).toEqual(["First", "Second", "Third"]);
+  });
+
+  it("stops dispatching after a failed queued send and keeps the items", async () => {
+    const first = deferred<Awaited<ReturnType<typeof chatWithDirectorStream>>>();
+    vi.mocked(chatWithDirectorStream)
+      .mockReturnValueOnce(first.promise)
+      .mockRejectedValueOnce(new Error("LLM offline"));
+    render(<DirectorPage />);
+    await screen.findByRole("heading", { name: "1. Corridor walk-in" });
+
+    typeAndClick("First", "Send");
+    await screen.findByRole("button", { name: "Cancel" });
+    typeAndClick("Second", "Queue");
+    typeAndClick("Third", "Queue");
+
+    await act(async () => { first.resolve(reply("Reply one")); });
+    await screen.findByText(/Something went wrong: LLM offline/);
+    expect(await screen.findByText("Queued (2)")).toBeTruthy();
+    expect(screen.getByText(/paused/)).toBeTruthy();
+    const queued = Array.from(document.querySelectorAll(".chat-queue-text")).map((node) => node.textContent);
+    expect(queued).toEqual(["Second", "Third"]);
+    await act(async () => { await Promise.resolve(); });
+    expect(sentMessages()).toEqual(["First", "Second"]);
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
   });
 });

@@ -298,7 +298,7 @@ async def vram_status() -> dict:
             for m in ollama_loaded
         ],
         "queue_waiters": getattr(orch, "_waiters", 0),
-        "chat_locked": bool(reservations),
+        "chat_locked": bool(reservations) and getattr(orch, "generation_blocks_llm", True),
         "director_chats": _active_director_chats(),
         "director_working": bool(_active_director_chats()),
         "generation_count": len(reservations),

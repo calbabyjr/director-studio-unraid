@@ -36,6 +36,7 @@ import {
   generationStatusText,
   type DirectorVramStatus,
 } from "./generationStatus";
+import { useDirectorChatQueue, type QueuedChatMessage } from "./useDirectorChatQueue";
 
 const MAX_CHAT_IMAGES = 4;
 const MAX_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -50,6 +51,8 @@ interface PendingChatImage {
   file: File;
   previewUrl: string;
 }
+
+type SendResult = "sent" | "queued" | "failed" | "cancelled" | "skipped";
 
 function layoutChatEntries(shot: Shot) {
   const layouts = shot.layout_refs;
@@ -241,7 +244,15 @@ function DirectorAgentWorkspace({
   const handledRequestId = useRef<string | null>(null);
   const generationLocked = vramStatus?.chat_locked === true;
   const chatActive = chatSession.active;
-  const chatDisabled = busy || compactingContext || generationLocked || chatActive || !llmModel;
+  const chatBusy = busy || compactingContext || generationLocked || chatActive;
+  const chatDisabled = chatBusy || !llmModel;
+  // While a turn runs, the composer stays editable and new messages queue up.
+  const canQueue = chatBusy && Boolean(projectId) && Boolean(llmModel);
+  const composerDisabled = chatDisabled && !canQueue;
+  const chatQueue = useDirectorChatQueue(projectId);
+  const [queuePaused, setQueuePaused] = useState(false);
+  const [dispatchTick, setDispatchTick] = useState(0);
+  const dispatchingRef = useRef(false);
 
   const addChatImages = (files: FileList | null) => {
     if (!files?.length) return;
@@ -393,6 +404,7 @@ function DirectorAgentWorkspace({
   useEffect(() => {
     seenLayouts.current = new Set();
     setLoadedProjectId(null);
+    setQueuePaused(false);
     setContextUsage([]);
     setChatSession(IDLE_CHAT_SESSION);
     if (!projectId) {
@@ -560,12 +572,25 @@ function DirectorAgentWorkspace({
     if (log) log.scrollTop = log.scrollHeight;
   }, [messages, busy, liveStatus, liveRuntime, liveThink, liveTokens, stickToBottom]);
 
-  const send = async (text?: string, options?: { preserveComposer?: boolean }) => {
-    setStickToBottom(true);
+  const send = async (
+    text?: string,
+    options?: { preserveComposer?: boolean; images?: PendingChatImage[] },
+  ): Promise<SendResult> => {
     const preserveComposer = options?.preserveComposer === true;
+    const outgoingImages = options?.images ?? (preserveComposer ? [] : [...pendingImages]);
     const typedMessage = (text ?? draft).trim();
-    const message = typedMessage || (pendingImages.length ? "Please analyze the attached image(s)." : "");
-    if (!message || chatDisabled) return;
+    const message = typedMessage || (outgoingImages.length ? "Please analyze the attached image(s)." : "");
+    if (!message) return "skipped";
+    if (canQueue && projectId && !options?.images) {
+      chatQueue.enqueue(projectId, message, outgoingImages);
+      if (!preserveComposer) {
+        setDraft("");
+        setPendingImages([]);
+      }
+      return "queued";
+    }
+    if (chatDisabled) return "skipped";
+    setStickToBottom(true);
     if (!projectId) {
       setBusy(true);
       setError(null);
@@ -588,16 +613,16 @@ function DirectorAgentWorkspace({
         ]);
         setDraft("");
         await refreshProjects();
+        return "sent";
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+        return "failed";
       } finally {
         setBusy(false);
       }
-      return;
     }
 
     const outgoingDraft = draft;
-    const outgoingImages = preserveComposer ? [] : [...pendingImages];
     const optimisticMessageId = `director-local-${Date.now()}-${Math.random()}`;
     if (!preserveComposer) setDraft("");
     const requestMessage = message;
@@ -685,12 +710,13 @@ function DirectorAgentWorkspace({
       ]);
       replaceShots(res.shots);
       await refreshProjects();
+      return "sent";
     } catch (e) {
       if (
         controller.signal.aborted
         || (e instanceof DOMException && e.name === "AbortError")
       ) {
-        return;
+        return "cancelled";
       }
       if (e instanceof DirectorChatError && e.code === "GPU_GENERATION_ACTIVE") {
         if (!preserveComposer) {
@@ -699,7 +725,7 @@ function DirectorAgentWorkspace({
         }
         setMessages((current) => current.filter((message) => message.id !== optimisticMessageId));
         void refreshVramStatus();
-        return;
+        return "failed";
       }
       const err = e instanceof Error ? e.message : String(e);
       setError(err);
@@ -710,6 +736,7 @@ function DirectorAgentWorkspace({
           content: `Something went wrong: ${err}`,
         },
       ]);
+      return "failed";
     } finally {
       if (chatAbortRef.current === controller) {
         chatAbortRef.current = null;
@@ -732,6 +759,8 @@ function DirectorAgentWorkspace({
     if (!projectId || !chatActive || llmBusy) return;
     setLlmBusy(true);
     setError(null);
+    // Cancelling means "stop": do not immediately fire the next queued message.
+    if (chatQueue.items.length) setQueuePaused(true);
     try {
       chatAbortRef.current?.abort();
       await cancelDirectorChatSession(projectId);
@@ -760,6 +789,36 @@ function DirectorAgentWorkspace({
     handledRequestId.current = requestedMessage.id;
     void send(requestedMessage.message);
   }, [requestedMessage, projectId, loadedProjectId, chatDisabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Send queued messages one at a time once the Director is idle. The refs guard
+  // against effect re-runs and a same-render requested send; a failed send goes
+  // back to the head and pauses the queue.
+  useEffect(() => {
+    if (
+      !projectId
+      || loadedProjectId !== projectId
+      || chatDisabled
+      || queuePaused
+      || dispatchingRef.current
+      || chatAbortRef.current
+    ) return;
+    const next: QueuedChatMessage | undefined = chatQueue.items[0];
+    if (!next) return;
+    dispatchingRef.current = true;
+    const targetId = projectId;
+    chatQueue.take(targetId, next.id);
+    void send(next.text, { preserveComposer: true, images: next.images })
+      .then((result) => {
+        if (result === "failed" || result === "skipped") {
+          chatQueue.restoreHead(targetId, next);
+          setQueuePaused(true);
+        }
+      })
+      .finally(() => {
+        dispatchingRef.current = false;
+        setDispatchTick((tick) => tick + 1);
+      });
+  }, [chatQueue.items, projectId, loadedProjectId, chatDisabled, queuePaused, dispatchTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateShot = (updated: Shot) => {
     shotRevision.current += 1;
@@ -1074,7 +1133,7 @@ function DirectorAgentWorkspace({
               key={c.label}
               type="button"
               className="mode-chip"
-              disabled={chatDisabled}
+              disabled={composerDisabled}
               onClick={() => void send(c.text)}
             >
               {c.label}
@@ -1101,6 +1160,50 @@ function DirectorAgentWorkspace({
           </div>
         ) : null}
 
+        {projectId && chatQueue.items.length ? (
+          <div className="chat-queue" aria-label="Queued messages">
+            <div className="chat-queue-header">
+              <span>
+                Queued ({chatQueue.items.length})
+                {queuePaused ? <span className="chat-queue-paused"> · paused</span> : null}
+              </span>
+              <div className="chat-queue-actions">
+                {queuePaused ? (
+                  <button type="button" className="btn ghost sm" onClick={() => setQueuePaused(false)}>
+                    Resume
+                  </button>
+                ) : null}
+                <button type="button" className="btn ghost sm" onClick={() => chatQueue.clear(projectId)}>
+                  Clear
+                </button>
+              </div>
+            </div>
+            <ol className="chat-queue-list">
+              {chatQueue.items.map((item) => (
+                <li
+                  key={item.id}
+                  className="chat-queue-item"
+                  title={item.images.length ? `${item.text}\n(Images are kept in memory only and are lost on refresh.)` : item.text}
+                >
+                  <span className="chat-queue-text">{item.text}</span>
+                  {item.images.length ? (
+                    <span className="chat-queue-images">
+                      {item.images.length} image{item.images.length === 1 ? "" : "s"}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    aria-label={`Remove queued message: ${item.text.slice(0, 40)}`}
+                    onClick={() => chatQueue.remove(projectId, item.id)}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
+
         <div className="chat-composer">
           <label
             className={`chat-upload-btn${!projectId || chatDisabled || pendingImages.length >= MAX_CHAT_IMAGES ? " disabled" : ""}`}
@@ -1122,11 +1225,13 @@ function DirectorAgentWorkspace({
           <textarea
             rows={mobile ? 2 : 3}
             value={draft}
-            disabled={chatDisabled}
+            disabled={composerDisabled}
             aria-label="Message to Director"
             placeholder={
               projectId
-                ? "Talk to the Director about the story, a weak shot, or what you want to change…"
+                ? canQueue
+                  ? "Talk to the Director… the Director is working, so this will be queued."
+                  : "Talk to the Director about the story, a weak shot, or what you want to change…"
                 : "Enter a project name, or paste a script to create a project…"
             }
             onChange={(e) => setDraft(e.target.value)}
@@ -1137,6 +1242,16 @@ function DirectorAgentWorkspace({
               }
             }}
           />
+          {canQueue ? (
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={!draft.trim() && pendingImages.length === 0}
+              onClick={() => void send()}
+            >
+              Queue
+            </button>
+          ) : null}
           {chatActive ? (
             <button
               type="button"
@@ -1146,7 +1261,7 @@ function DirectorAgentWorkspace({
             >
               Cancel
             </button>
-          ) : (
+          ) : canQueue ? null : (
             <button
               type="button"
               className="btn primary"
