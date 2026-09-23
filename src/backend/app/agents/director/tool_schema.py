@@ -323,7 +323,7 @@ ASK_CHOICES_TOOL = function_tool(
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 400,
-                        "description": "The question shown above the checkboxes.",
+                        "description": "The question shown above the options.",
                     },
                     "options": {
                         "type": "array",
@@ -333,7 +333,7 @@ ASK_CHOICES_TOOL = function_tool(
                     },
                     "allow_multiple": {
                         "type": "boolean",
-                        "description": "True if they may tick more than one box.",
+                        "description": "Default false: exactly one answer, shown as radio buttons. Set true only when several answers can apply together (checkboxes).",
                     },
                 },
                 "required": ["prompt", "options"],

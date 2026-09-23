@@ -42,4 +42,19 @@ describe("ChoiceChecklist", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send answers" }));
     expect(onSubmit).toHaveBeenCalledWith("Who is this about?: Jenny; Wendy");
   });
+
+  it("uses radio buttons for single-choice questions", () => {
+    const onSubmit = vi.fn();
+    render(
+      <ChoiceChecklist
+        questions={[{ prompt: "Lighting?", options: ["Dim", "Well lit"] }]}
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Dim" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Well lit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send answers" }));
+    expect(onSubmit).toHaveBeenCalledWith("Lighting?: Well lit");
+  });
 });

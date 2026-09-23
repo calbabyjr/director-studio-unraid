@@ -605,7 +605,7 @@ Tool-call rules:
 2) Tool results are returned to you. Only then briefly explain what actually completed.
 3) Do not call tools for a question that only needs an answer.
 4) After you name the next production action, emit that native tool call in the same response. Prose plans without a tool call are incomplete.
-5) ask_choices  {"questions":[{"prompt":"...","options":["A","B"],"allow_multiple":true}]}  // checkbox questions; wait for the reply"""
+5) ask_choices  {"questions":[{"prompt":"...","options":["A","B"]}]}  // one answer = radio buttons; add "allow_multiple":true only when several can apply; wait for the reply"""
 
 
 def _filter_tools_to_offered_schemas(

@@ -81,7 +81,7 @@ export function ChoiceChecklist({
     setSelected((current) =>
       current.map((picks, index) => {
         if (index !== questionIndex) return picks;
-        if (!allowMultiple) return picks.includes(option) ? [] : [option];
+        if (!allowMultiple) return [option];
         return picks.includes(option) ? picks.filter((item) => item !== option) : [...picks, option];
       }),
     );
@@ -108,9 +108,10 @@ export function ChoiceChecklist({
               <label key={`${optionIndex}-${option}`} className="choice-checklist-option" htmlFor={id}>
                 <input
                   id={id}
-                  type="checkbox"
+                  type={question.allow_multiple ? "checkbox" : "radio"}
+                  name={`choice-${questionIndex}`}
                   checked={checked}
-                  onChange={() => toggle(questionIndex, option, question.allow_multiple !== false)}
+                  onChange={() => toggle(questionIndex, option, question.allow_multiple === true)}
                 />
                 <span>{option}</span>
               </label>

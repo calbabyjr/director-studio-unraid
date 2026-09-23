@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field, field_validator
 class ChoiceQuestion(BaseModel):
     prompt: str = Field(min_length=1, max_length=400)
     options: list[str] = Field(min_length=2, max_length=8)
-    allow_multiple: bool = True
+    # Single choice (radio buttons) unless the Director allows several answers.
+    allow_multiple: bool = False
 
     @field_validator("options")
     @classmethod
@@ -35,7 +36,7 @@ def normalize_choice_questions(raw: Any) -> list[ChoiceQuestion]:
             {
                 "prompt": raw.get("prompt") or raw.get("question") or "Choose one",
                 "options": raw.get("options"),
-                "allow_multiple": raw.get("allow_multiple", True),
+                "allow_multiple": raw.get("allow_multiple", False),
             }
         ]
     if not isinstance(raw, list):
@@ -49,7 +50,7 @@ def normalize_choice_questions(raw: Any) -> list[ChoiceQuestion]:
                 ChoiceQuestion(
                     prompt=str(item.get("prompt") or item.get("question") or "Choose one").strip() or "Choose one",
                     options=list(item.get("options") or []),
-                    allow_multiple=bool(item.get("allow_multiple", True)),
+                    allow_multiple=bool(item.get("allow_multiple", False)),
                 )
             )
         except Exception:
