@@ -155,6 +155,25 @@ def _unavailable_tool_guidance(names: list[str]) -> str:
     )
 
 
+def _authorized_generation_tool(message: str, offered_tools: list[dict], messages: list[dict]) -> str | None:
+    """Generation tool the user explicitly asked for this turn that has not run yet."""
+    from .intent import explicit_h3_generation_intent, explicit_layout_generation_intent
+
+    offered = {str(t.get("function", {}).get("name") or "") for t in offered_tools or []}
+    called = {
+        str(call.get("function", {}).get("name") or "")
+        for item in messages
+        for call in (item.get("tool_calls") or [])
+    }
+    for name, wanted in (
+        ("queue_ref_frame", explicit_layout_generation_intent(message)),
+        ("queue_h3", explicit_h3_generation_intent(message)),
+    ):
+        if wanted and name in offered and name not in called:
+            return name
+    return None
+
+
 class BackendTurn:
     """A bounded, process-local turn, never a second project or session store."""
 
@@ -387,6 +406,21 @@ class BackendTurn:
             retry = await self.chat_fn(system, self.message, messages=follow, **infer_kwargs)
             if isinstance(retry, dict):
                 result = retry
+        elif not compacting and not (result.get("tool_calls") or []):
+            authorized = _authorized_generation_tool(self.message, offered_tools, messages)
+            if authorized:
+                # The user explicitly asked for this generation and the tool is
+                # offered, but the model answered with another summary. Ask once.
+                follow = [dict(item) for item in messages]
+                follow.append({"role": "assistant", "content": content})
+                follow.append({"role": "user", "content": (
+                    f"[Backend] The user's current message explicitly authorizes this generation. "
+                    f"Call {authorized} now with the exact shot and source references already "
+                    "discussed (from PROJECT_STATE). Do not summarize or ask again."
+                )})
+                retry = await self.chat_fn(system, self.message, messages=follow, **infer_kwargs)
+                if isinstance(retry, dict):
+                    result = retry
         return result
 
     async def tool(self, params):

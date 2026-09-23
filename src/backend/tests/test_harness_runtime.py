@@ -1315,3 +1315,16 @@ def test_unknown_gated_tool_removes_tools_and_explains_authorization():
     assert "Generate the Layout" in guidance
     assert "Do not call any tool again" in guidance
     assert harness_runtime._unavailable_tool_calls(messages[:2]) == []
+
+
+def test_explicit_layout_request_nudges_a_prose_only_reply_once():
+    from app.agents.director.harness_runtime import _authorized_generation_tool
+
+    offered = [{"type": "function", "function": {"name": "queue_ref_frame"}}]
+    msg = 'again. Remember to give me "radio" buttons. Generate the Layout now'
+    assert _authorized_generation_tool(msg, offered, []) == "queue_ref_frame"
+    already = [{"role": "assistant", "content": "", "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": "queue_ref_frame", "arguments": {}}}]}]
+    assert _authorized_generation_tool(msg, offered, already) is None
+    assert _authorized_generation_tool(msg, [], []) is None
+    assert _authorized_generation_tool("What does the layout look like?", offered, []) is None
