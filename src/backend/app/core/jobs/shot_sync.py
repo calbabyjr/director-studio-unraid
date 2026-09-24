@@ -13,6 +13,7 @@ from ...pipelines.registry import get_pipeline
 from ..projects.layouts import (
     LayoutReference,
     LayoutReviewStatus,
+    LAYOUT_WAITING_FOR_SLOT,
     mirror_legacy_layout_fields,
     sync_selected_layout_refs,
 )
@@ -264,7 +265,7 @@ def _sync_ref_frame(job: JobRecord) -> None:
         # waiting and the user can free a slot, instead of leaving it "queued".
         unselected = updated_ref.model_copy(update={
             "selected_for_h3": False,
-            "job_error": f"Layout ready but not selected for H3: {exc}",
+            "job_error": f"{LAYOUT_WAITING_FOR_SLOT}: {exc}",
         })
         # Leave refs and the legacy layout fields untouched: they are the shot's
         # valid current Picture set, and the new Layout must not count toward it.

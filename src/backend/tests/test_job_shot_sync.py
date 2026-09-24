@@ -742,3 +742,49 @@ def test_layout_over_picture_cap_is_recorded_ready_but_unselected(isolated_data)
     assert "not selected for H3" in layout.job_error
     assert len(updated.refs) == 9
     assert updated.status == ShotStatus.needs_review
+
+
+def test_waiting_layout_is_selected_once_a_picture_slot_frees(isolated_data):
+    from app.core.projects.layouts import sync_selected_layout_refs
+
+    project = create_project("Free a slot", "script")
+    job_id = "job_ff_waiting"
+    refs = [
+        ShotRef(role=RefRole.actor, asset_id=f"act_{i}", file_key="master", picture_index=i + 1)
+        for i in range(9)
+    ]
+    shot = _make_shot(
+        project.id, refs=refs, ref_frame_job_id=job_id,
+        layout_refs=[LayoutReference(id="lref_wait", job_id=job_id, job_status=JobStatus.queued, purpose="wide")],
+    )
+    job = _succeeded_ref_frame_job(
+        isolated_data, job_id=job_id, shot_id=shot.id, project_id=project.id, layout_ref_id="lref_wait",
+    )
+    store.save_job(job)
+    on_pipeline_job_terminal(job)
+    waiting = load_shot(project.id, shot.id)
+    assert waiting.layout_refs[0].selected_for_h3 is False
+
+    freed = waiting.model_copy(update={"refs": waiting.refs[:7]})
+    synced = sync_selected_layout_refs(freed)
+
+    assert synced.layout_refs[0].selected_for_h3 is True
+    assert synced.layout_refs[0].job_error == ""
+    assert [r.role for r in synced.refs].count(RefRole.layout_ref_frame) == 1
+    assert len(synced.refs) == 8
+
+
+def test_materialized_validation_accepts_the_shots_own_layout_picture():
+    from app.agents.director.casting_service import _validate_materialized_storyboard_bindings
+
+    layout_pic = ShotRef(role=RefRole.layout_ref_frame, asset_id="lay_own", picture_index=1)
+    shot = Shot(
+        id="sht_own", project_id="prj", scene_id="sc01", title="t", script_beat="b", duration_s=5.0,
+        refs=[layout_pic],
+        layout_refs=[LayoutReference(id="lref_own", asset_id="lay_own", job_status=JobStatus.succeeded)],
+    )
+    _validate_materialized_storyboard_bindings([shot], inventory=[], index={})
+
+    stranger = shot.model_copy(update={"refs": [layout_pic.model_copy(update={"asset_id": "lay_other"})]})
+    with pytest.raises(ValueError, match="inaccessible image asset 'lay_other'"):
+        _validate_materialized_storyboard_bindings([stranger], inventory=[], index={})

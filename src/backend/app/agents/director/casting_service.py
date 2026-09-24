@@ -9,7 +9,7 @@ from typing import Any, Callable
 from ...core.library.store import load_asset
 from ...core.projects.models import PromptSections, RefRole, Shot, ShotRef, ShotVoiceRef, ShotStatus
 from ...core.projects.store import new_shot_id
-from ...core.schemas import LibraryAsset
+from ...core.schemas import JobStatus, LibraryAsset
 from .asset_catalog import _asset_index, _default_file_key, _inventory, _repair_unique_file_key_typo
 from .planner import ShotDraft, role_to_library_kind, role_to_ref_role
 
@@ -464,7 +464,15 @@ def _validate_materialized_storyboard_bindings(
         RefRole.other: {"actors", "costumes", "scenes", "props"},
     }
     for shot_index, shot in enumerate(shots, start=1):
+        # Layout Pictures are owned by the shot's own LayoutReferences, not the
+        # casting inventory (which deliberately omits layouts).
+        own_layouts = {
+            layout.asset_id for layout in shot.layout_refs
+            if layout.asset_id and layout.job_status == JobStatus.succeeded
+        }
         for ref in shot.refs:
+            if ref.role == RefRole.layout_ref_frame and ref.asset_id in own_layouts:
+                continue
             asset = index.get(ref.asset_id)
             inventory_item = inventory_by_id.get(ref.asset_id)
             if asset is None or inventory_item is None:

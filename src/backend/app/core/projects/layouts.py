@@ -326,6 +326,37 @@ def _selected_layouts_for_h3(shot: Shot) -> list[LayoutReference]:
     return [current]
 
 
+# job_error prefix for a finished Layout that could not become an H3 Picture
+# because the shot was full; it is promoted once a slot frees up.
+LAYOUT_WAITING_FOR_SLOT = "Layout ready but not selected for H3"
+
+
+def _promote_waiting_layout(shot: Shot) -> Shot | None:
+    """Select the newest Layout that finished while the shot had no free Picture."""
+    waiting = [
+        layout for layout in shot.layout_refs
+        if layout.asset_id
+        and layout.job_status == JobStatus.succeeded
+        and (layout.job_error or "").startswith(LAYOUT_WAITING_FOR_SLOT)
+    ]
+    if not waiting:
+        return None
+    newest = waiting[-1]
+    order = {layout.id: index for index, layout in enumerate(shot.layout_refs)}
+    if any(
+        layout.selected_for_h3 and order[layout.id] > order[newest.id]
+        for layout in shot.layout_refs
+    ):
+        return None  # a newer Layout is already current; never roll back to an older one
+    append = newest.activation_mode == "append"
+    return shot.model_copy(update={"layout_refs": [
+        newest.model_copy(update={"selected_for_h3": True, "job_error": ""})
+        if layout.id == newest.id
+        else layout if append else layout.model_copy(update={"selected_for_h3": False})
+        for layout in shot.layout_refs
+    ]})
+
+
 def sync_selected_layout_refs(shot: Shot) -> Shot:
     """Rebuild H3 Pictures from the Shot's explicitly active Layout set.
 
@@ -336,6 +367,12 @@ def sync_selected_layout_refs(shot: Shot) -> Shot:
     """
     from .models import ShotRef
 
+    promoted = _promote_waiting_layout(shot)
+    if promoted is not None:
+        try:
+            return sync_selected_layout_refs(promoted)
+        except ValueError:
+            pass  # still no free Picture slot; keep the current set
     selected = _selected_layouts_for_h3(shot)
     active_ids = {layout.id for layout in selected}
     normalized_layouts = [
