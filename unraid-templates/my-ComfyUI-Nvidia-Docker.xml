@@ -38,7 +38,7 @@ Note:&#13;
   <WebUI>http://[IP]:[PORT:8188]</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/mmartial/unraid-templates/main/templates/ComfyUI-Nvidia-Docker.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/mmartial/unraid-templates/main/templates/img/ComfyUI-Nvidia-Docker.png</Icon>
-  <ExtraParams>--runtime=nvidia --memory=64G</ExtraParams>
+  <ExtraParams>--runtime=nvidia --memory=72G</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DateInstalled>1783576179</DateInstalled>
