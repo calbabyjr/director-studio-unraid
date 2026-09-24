@@ -229,11 +229,87 @@ def _schema_error_message(error) -> str:
     return f"{field}: {error.message}"
 
 
+# Picture slots are scarce: keep the set (scene) and the people, drop props first.
+_SOURCE_REF_PRIORITY = {"scene": 0, "actor": 1, "costume": 2, "layout_ref_frame": 3, "prop": 4, "other": 5}
+
+
+def _fit_source_refs(args: dict, schema: dict) -> tuple[dict, str]:
+    """Trim over-long source_refs to the schema limit instead of rejecting the call.
+
+    The local model repeatedly resent four refs to a three-slot Layout graph and
+    then fell back to prose; choosing the slots here is deterministic. One ref
+    per asset is kept before any second view of the same asset.
+    """
+    props = (schema.get("parameters") or {}).get("properties") or {}
+    dropped: list[str] = []
+    fitted = dict(args)
+    for field in ("source_refs", "additional_source_refs"):
+        refs, limit = args.get(field), (props.get(field) or {}).get("maxItems")
+        if not isinstance(refs, list) or not isinstance(limit, int) or len(refs) <= limit:
+            continue
+        def rank(i: int) -> tuple[int, int]:
+            ref = refs[i] if isinstance(refs[i], dict) else {}
+            return _SOURCE_REF_PRIORITY.get(str(ref.get("role")), 9), i
+
+        keep: list[int] = []
+        seen: set[str] = set()
+        # First view of each asset by priority, then extra views if slots remain.
+        for second_pass in (False, True):
+            for i in sorted(range(len(refs)), key=rank):
+                asset = str(refs[i].get("asset_id")) if isinstance(refs[i], dict) else ""
+                if len(keep) < limit and i not in keep and (second_pass or asset not in seen):
+                    keep.append(i)
+                    seen.add(asset)
+        keep.sort()
+        fitted[field] = [refs[i] for i in keep]
+        dropped.extend(
+            f"{(refs[i] or {}).get('role')}:{(refs[i] or {}).get('asset_id')}"
+            for i in range(len(refs)) if i not in keep and isinstance(refs[i], dict)
+        )
+    note = (
+        f"Backend kept the {len(fitted.get('source_refs') or [])} most important source_refs "
+        f"(limit reached) and dropped: {', '.join(dropped)}. Describe dropped items in the text instead."
+        if dropped else ""
+    )
+    return fitted, note
+
+
+_APPROVAL = re.compile(
+    r"^\s*(?:yes|yep|yeah|ok(?:ay)?|sure|approved?|i approve|go(?: ahead)?|do it|"
+    r"looks good|perfect|great|confirmed?|lgtm|sounds good)\b",
+    re.I,
+)
+_APPROVAL_HEDGE = re.compile(r"\?|\b(?:but|not|don't|dont|change|instead|except|wait)\b", re.I)
+_LAYOUT_PROPOSAL = re.compile(
+    r"queue the layout|generate the layout|here's what i would do|here’s what i would do|to authorize",
+    re.I,
+)
+LAYOUT_GO_AHEAD = "Queue the Layout now."
+
+
+def approval_gate_message(message: str, history: list | None) -> str:
+    """Treat a short approval of a proposed Layout as the explicit go-ahead."""
+    text = (message or "").strip()
+    if len(text) > 120 or not _APPROVAL.search(text) or _APPROVAL_HEDGE.search(text):
+        return message
+    last = next(
+        (str(row.get("content") or "") for row in reversed(history or [])
+         if isinstance(row, dict) and row.get("role") == "assistant"),
+        "",
+    )
+    if re.search(r"\blayout\b", last, re.I) and _LAYOUT_PROPOSAL.search(last):
+        return f"{message}\n{LAYOUT_GO_AHEAD}"
+    return message
+
+
 class BackendTurn:
     """A bounded, process-local turn, never a second project or session store."""
 
     def __init__(self, project_id, message, svc, chat_fn, *, images=None, captions=None, on_progress=None, compact_only=False, history=None):
         self.project_id, self.message = project_id, message
+        # What tool gating reads: the message, plus an explicit Layout go-ahead
+        # when the user just approved a Layout the Director proposed.
+        self.gate_message = approval_gate_message(message, history)
         self.compact_only = compact_only
         self.seed_history = list(history or [])
         self.svc, self.chat_fn, self.on_progress = svc, chat_fn, on_progress
@@ -280,7 +356,7 @@ class BackendTurn:
         project, shots, version = self.snapshot()
         pending = any(not isinstance(u.get("classification"), dict) for u in self.uploads)
         tools = director_tool_schemas(
-            project, current_message=self.message,
+            project, current_message=self.gate_message,
             allow_save_storyboard=not self.budget.exhausted,
             include_chat_image_import=pending,
         )
@@ -464,7 +540,7 @@ class BackendTurn:
             if isinstance(retry, dict):
                 result = retry
         elif not compacting and not (result.get("tool_calls") or []):
-            authorized = _authorized_generation_tool(self.message, offered_tools, messages)
+            authorized = _authorized_generation_tool(self.gate_message, offered_tools, messages)
             if authorized:
                 # The user explicitly asked for this generation and the tool is
                 # offered, but the model answered with another summary. Ask once.
@@ -515,6 +591,9 @@ class BackendTurn:
         if schema is None:
             return {"ok": False, "error": f"Tool is not currently offered: {name}"}
         raw_fingerprint = fingerprint
+        args, trimmed_refs = _fit_source_refs(args, schema)
+        if trimmed_refs:
+            fingerprint = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
         if name == "append_shot":
             try:
                 args = AppendShotSubmission.model_validate(args).model_dump(mode="json", exclude_unset=True)
@@ -574,6 +653,8 @@ class BackendTurn:
         self.notes.extend(notes)
         self.touched |= touched
         result = {"ok": True, "notes": notes}
+        if trimmed_refs:
+            result["notes"] = [trimmed_refs, *notes]
         for payload in payloads:
             result.update(payload)
             if payload.get("choices"):

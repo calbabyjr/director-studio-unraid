@@ -1399,3 +1399,50 @@ def test_schema_errors_name_the_field_and_limit():
     assert _schema_error_message(error) == (
         "source_refs: at most 3 items allowed (got 4). Keep only the most important ones."
     )
+
+
+def test_over_long_layout_source_refs_keep_scene_and_actors():
+    from app.agents.director.harness_runtime import _fit_source_refs
+
+    schema = {"parameters": {"properties": {"source_refs": {"type": "array", "maxItems": 3}}}}
+    args = {"source_refs": [
+        {"role": "scene", "asset_id": "scn_1"},
+        {"role": "prop", "asset_id": "prp_leash"},
+        {"role": "actor", "asset_id": "act_wendy", "file_key": "fullbody_threeview"},
+        {"role": "actor", "asset_id": "act_wendy", "file_key": "bust_threeview"},
+        {"role": "actor", "asset_id": "act_jenny", "file_key": "fullbody_threeview"},
+    ]}
+    fitted, note = _fit_source_refs(args, schema)
+    assert [(r["role"], r["asset_id"]) for r in fitted["source_refs"]] == [
+        ("scene", "scn_1"), ("actor", "act_wendy"), ("actor", "act_jenny"),
+    ]
+    assert fitted["source_refs"][1]["file_key"] == "fullbody_threeview"
+    assert "prop:prp_leash" in note and "act_wendy" in note
+    same, no_note = _fit_source_refs({"source_refs": args["source_refs"][:2]}, schema)
+    assert same["source_refs"] == args["source_refs"][:2] and no_note == ""
+
+
+@pytest.mark.parametrize(
+    ("message", "authorizes"),
+    [("yes", True), ("Approved", True), ("looks good, go ahead", True), ("do it", True),
+     ("yes but make Wendy taller", False), ("yes?", False), ("don't", False),
+     ("Make Jenny kneel instead", False)],
+)
+def test_short_approval_of_a_proposed_layout_authorizes_it(message, authorizes):
+    from app.agents.director.harness_runtime import approval_gate_message
+    from app.agents.director.intent import explicit_layout_generation_intent
+
+    history = [
+        {"role": "user", "content": "Make Jenny be on all fours"},
+        {"role": "assistant", "content": "Calvin, here's what I would do: Layout for Shot 1 ... "
+                                         'To authorize this, say: "Queue the Layout now"'},
+    ]
+    gated = approval_gate_message(message, history)
+    assert explicit_layout_generation_intent(gated) is authorizes
+
+
+def test_approval_without_a_layout_proposal_changes_nothing():
+    from app.agents.director.harness_runtime import approval_gate_message
+
+    history = [{"role": "assistant", "content": "Shall I write the H3 prompt for Shot 2?"}]
+    assert approval_gate_message("yes", history) == "yes"
