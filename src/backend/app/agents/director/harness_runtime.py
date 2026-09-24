@@ -211,6 +211,24 @@ def _authorized_generation_tool(message: str, offered_tools: list[dict], message
     return None
 
 
+def _schema_error_message(error) -> str:
+    """Name the field and the limit; jsonschema's default ("[...] is too long") hides both."""
+    field = ".".join(str(part) for part in error.absolute_path) or "arguments"
+    limit, instance = error.validator_value, error.instance
+    if error.validator == "maxItems":
+        return (f"{field}: at most {limit} items allowed (got {len(instance)}). "
+                "Keep only the most important ones.")
+    if error.validator == "minItems":
+        return f"{field}: at least {limit} items required (got {len(instance)})."
+    if error.validator == "maxLength":
+        return f"{field}: at most {limit} characters allowed (got {len(instance)}). Shorten it."
+    if error.validator == "enum":
+        return f"{field}: must be one of {limit}."
+    if error.validator == "required":
+        return f"{field}: {error.message}."
+    return f"{field}: {error.message}"
+
+
 class BackendTurn:
     """A bounded, process-local turn, never a second project or session store."""
 
@@ -232,6 +250,8 @@ class BackendTurn:
         self.budget = _StoryboardSubmissionBudget()
         self.call_ids: set[str] = set()
         self.calls: set[tuple[str, str]] = set()
+        # fingerprint -> error for calls rejected before execution this turn.
+        self.failed_calls: dict[str, str] = {}
         self.successful_prompt_shot_ids: set[str] = set()
         self.storyboard_failed = False
         self.terminal_failure: str | None = None
@@ -514,9 +534,16 @@ class BackendTurn:
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
             fingerprint = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
+        if fingerprint in self.failed_calls:
+            return {"ok": False, "error": (
+                f"This exact {name} call already failed this turn: {self.failed_calls[fingerprint]} "
+                "Change the arguments as the error says; do not resend it unchanged."
+            )}
         errors = list(Draft202012Validator(schema["parameters"]).iter_errors(args))
         if errors:
-            return {"ok": False, "error": errors[0].message}
+            message = _schema_error_message(errors[0])
+            self.failed_calls[fingerprint] = message
+            return {"ok": False, "error": message}
         project, shots, version = self.snapshot()
         if name not in {"get_status", "inspect_asset"} and (
             (version, raw_fingerprint) in self.calls

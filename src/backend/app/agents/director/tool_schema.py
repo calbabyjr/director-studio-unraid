@@ -497,6 +497,11 @@ DIRECTOR_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "source_refs": {
                 "type": "array",
                 "maxItems": 3,
+                "description": (
+                    "At most 3 Pictures (the Layout graph has three image slots). "
+                    "Usually the scene plus the one or two actors who must appear; "
+                    "add a prop only when it is central to the composition."
+                ),
                 "items": LAYOUT_SOURCE_REF_ITEM,
             },
         },

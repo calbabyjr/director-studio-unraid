@@ -1388,3 +1388,14 @@ def test_curly_apostrophe_negation_blocks_layout_tool():
     from app.agents.director.intent import explicit_layout_generation_intent
 
     assert explicit_layout_generation_intent("Don’t generate the layout") is False
+
+
+def test_schema_errors_name_the_field_and_limit():
+    from jsonschema import Draft202012Validator
+    from app.agents.director.harness_runtime import _schema_error_message
+
+    schema = {"type": "object", "properties": {"source_refs": {"type": "array", "maxItems": 3}}}
+    error = next(Draft202012Validator(schema).iter_errors({"source_refs": [1, 2, 3, 4]}))
+    assert _schema_error_message(error) == (
+        "source_refs: at most 3 items allowed (got 4). Keep only the most important ones."
+    )
