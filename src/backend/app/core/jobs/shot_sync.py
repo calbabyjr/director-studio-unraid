@@ -251,13 +251,30 @@ def _sync_ref_frame(job: JobRecord) -> None:
         else:
             refs = ensure_layout_ref(working) if working.layout_asset_id else working.refs
             updated = working.model_copy(update={"refs": refs})
-    except ValueError:
+    except ValueError as exc:
         logger.exception(
             "could not bind ref_frame job %s as a layout ref for shot %s",
             job.id,
             shot.id,
         )
-        return
+        if target is None:
+            return
+        # The Layout rendered; only selecting it as an H3 Picture failed (e.g. the
+        # 9-Picture cap). Record it as finished but unselected so the UI stops
+        # waiting and the user can free a slot, instead of leaving it "queued".
+        unselected = updated_ref.model_copy(update={
+            "selected_for_h3": False,
+            "job_error": f"Layout ready but not selected for H3: {exc}",
+        })
+        # Leave refs and the legacy layout fields untouched: they are the shot's
+        # valid current Picture set, and the new Layout must not count toward it.
+        updated = shot.model_copy(update={
+            "layout_refs": [
+                unselected if item.id == target.id else item
+                for item in shot.layout_refs
+            ],
+            "status": ShotStatus.needs_review,
+        })
     save_shot(updated)
     logger.info(
         "ref_frame job %s → shot %s needs_review layout=%s",

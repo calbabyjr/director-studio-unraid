@@ -709,3 +709,36 @@ async def test_run_job_success_triggers_ref_frame_shot_sync(isolated_data, monke
     assert updated.layout_review_status == "pending_review"
     assert updated.layout_asset_id is not None
     assert updated.ref_frame_job_id == job.id
+
+
+def test_layout_over_picture_cap_is_recorded_ready_but_unselected(isolated_data):
+    """A full 9-Picture shot must not leave its finished Layout stuck as queued."""
+    project = create_project("Full Picture set", "script")
+    job_id = "job_ff_over_cap"
+    refs = [
+        ShotRef(role=RefRole.actor, asset_id=f"act_{i}", file_key="master", picture_index=i + 1)
+        for i in range(9)
+    ]
+    shot = _make_shot(
+        project.id,
+        refs=refs,
+        layout_refs=[
+            LayoutReference(id="lref_full", job_id=job_id, job_status=JobStatus.queued, purpose="wide"),
+        ],
+        ref_frame_job_id=job_id,
+    )
+    job = _succeeded_ref_frame_job(
+        isolated_data, job_id=job_id, shot_id=shot.id, project_id=project.id, layout_ref_id="lref_full",
+    )
+    store.save_job(job)
+
+    on_pipeline_job_terminal(job)
+
+    updated = load_shot(project.id, shot.id)
+    layout = updated.layout_refs[0]
+    assert layout.job_status == JobStatus.succeeded
+    assert layout.asset_id is not None
+    assert layout.selected_for_h3 is False
+    assert "not selected for H3" in layout.job_error
+    assert len(updated.refs) == 9
+    assert updated.status == ShotStatus.needs_review
