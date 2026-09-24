@@ -1446,3 +1446,24 @@ def test_approval_without_a_layout_proposal_changes_nothing():
 
     history = [{"role": "assistant", "content": "Shall I write the H3 prompt for Shot 2?"}]
     assert approval_gate_message("yes", history) == "yes"
+
+
+@pytest.mark.parametrize(
+    ("message", "video"),
+    [("Generate the H3 prompt", False), ("Write the H3 prompt for shot 1", False),
+     ("Generate the H3 video for shot 1", True), ("Queue H3 for shot 2", True)],
+)
+def test_h3_prompt_requests_are_not_video_renders(message, video):
+    from app.agents.director.intent import explicit_h3_generation_intent
+
+    assert explicit_h3_generation_intent(message) is video
+
+
+def test_prompt_request_nudges_write_prompt():
+    from app.agents.director.harness_runtime import _authorized_generation_tool
+
+    offered = [{"type": "function", "function": {"name": "write_prompt"}},
+               {"type": "function", "function": {"name": "queue_h3"}}]
+    assert _authorized_generation_tool("Generate the H3 prompt", offered, []) == "write_prompt"
+    assert _authorized_generation_tool("Write the H3 prompt for shot 1", offered, []) == "write_prompt"
+    assert _authorized_generation_tool("What is in the H3 prompt?", offered, []) is None

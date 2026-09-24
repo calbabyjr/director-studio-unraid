@@ -162,17 +162,16 @@ def _unavailable_tool_calls(messages: list[dict]) -> list[str]:
 def _unavailable_tool_guidance(names: list[str]) -> str:
     hints = [_TOOL_AUTHORIZATION_HINTS[n] for n in names if n in _TOOL_AUTHORIZATION_HINTS]
     return (
-        f"[Backend] {', '.join(names)} is not available in this turn, so nothing was queued. "
+        f"[Backend] {', '.join(names)} is not available in this turn, so nothing ran. "
         + (" ".join(hints) + " " if hints else "")
-        + "Do not call any tool again this turn. Reply to the user: summarize exactly what you "
-        "would do (shot, purpose, visual state, source references) and tell them the phrase "
-        "that authorizes it."
+        + "Do not call any tool again this turn. In one or two sentences, tell the user "
+        "what is needed to proceed. Do not repeat an earlier plan or summary."
     )
 
 
 _COMMAND_START = re.compile(
     r"(?:^|[.!;\n]\s*)(?:(?:ok(?:ay)?|yes|now|please|go ahead and|so)[,\s]+)*"
-    r"(?:generate|regenerate|queue|make|render|create|run)\b",
+    r"(?:generate|regenerate|queue|make|render|create|run|write|rewrite)\b",
     re.I,
 )
 _COMMAND_HEDGE = re.compile(
@@ -192,7 +191,9 @@ def _explicit_generation_command(message: str) -> bool:
 
 def _authorized_generation_tool(message: str, offered_tools: list[dict], messages: list[dict]) -> str | None:
     """Generation tool the user explicitly asked for this turn that has not run yet."""
-    from .intent import explicit_h3_generation_intent, explicit_layout_generation_intent
+    from .intent import (
+        explicit_h3_generation_intent, explicit_layout_generation_intent, prompt_writing_intent,
+    )
 
     if not _explicit_generation_command(message):
         return None
@@ -205,6 +206,7 @@ def _authorized_generation_tool(message: str, offered_tools: list[dict], message
     for name, wanted in (
         ("queue_ref_frame", explicit_layout_generation_intent(message)),
         ("queue_h3", explicit_h3_generation_intent(message)),
+        ("write_prompt", prompt_writing_intent(message)),
     ):
         if wanted and name in offered and name not in called:
             return name
@@ -300,6 +302,12 @@ def approval_gate_message(message: str, history: list | None) -> str:
     if re.search(r"\blayout\b", last, re.I) and _LAYOUT_PROPOSAL.search(last):
         return f"{message}\n{LAYOUT_GO_AHEAD}"
     return message
+
+
+_PROMPT_INVALIDATING_TOOLS = frozenset({
+    "revise_shot", "patch_shot_refs", "set_shot_scene_ref", "append_shot", "save_storyboard",
+    "accept_ref_frame",
+})
 
 
 class BackendTurn:
@@ -674,6 +682,9 @@ class BackendTurn:
             saved_shot_id = result.get("shot_id") or args.get("shot_id")
             if isinstance(saved_shot_id, str) and saved_shot_id:
                 self.successful_prompt_shot_ids.add(saved_shot_id)
+        elif result["ok"] and name in _PROMPT_INVALIDATING_TOOLS:
+            # These can clear or stale the saved prompt; a rewrite must run again.
+            self.successful_prompt_shot_ids.clear()
         completed_actions = self.actions[before:]
         if result["ok"] and any(
             action == "ref_frame_all" or action.startswith("ref_frame:")

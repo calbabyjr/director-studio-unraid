@@ -40,6 +40,9 @@ def explicit_h3_generation_intent(message: str) -> bool:
         flags=re.I,
     ):
         return False
+    # "Generate the H3 prompt" asks for prompt writing, not a video render.
+    if re.search(r"\bprompts?\b", text) and not re.search(r"\b(?:video|clip)s?\b", text):
+        return False
     return bool(
         re.search(
             r"\b(?:generate|queue|render|submit|run)\b.{0,48}\b(?:h3|clip|video)\b",
@@ -529,3 +532,11 @@ def detect_intent(
     if not script_locked and not shots and looks_like_script(raw):
         return "set_script", {"script_text": raw}
     return "llm", {}
+
+
+def prompt_writing_intent(message: str) -> bool:
+    """An explicit request to write (or regenerate) a shot's H3 prompt."""
+    text = normalize_text(message)
+    return bool(re.search(
+        r"\b(?:write|rewrite|generate|regenerate|redo|refresh|create|make)\b.{0,40}\bprompts?\b", text,
+    ))
