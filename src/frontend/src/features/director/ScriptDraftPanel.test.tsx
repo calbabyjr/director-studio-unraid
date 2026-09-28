@@ -51,8 +51,27 @@ describe("ScriptDraftPanel", () => {
     );
     expect(screen.queryByLabelText("Screenplay")).toBeNull();
     expect(screen.queryByRole("button", { name: "Approve and lock" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show screenplay" }));
+    const toggle = screen.getByRole("button", { name: "Toggle screenplay" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByLabelText("Screenplay")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Approve and lock" })).toBeTruthy();
+  });
+
+  it("keeps the screenplay toggle name stable after toggling", () => {
+    render(
+      <ScriptDraftPanel
+        project={{ ...project, script_draft_pending: false }}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: "Toggle screenplay" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Toggle screenplay" })).toBe(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Toggle screenplay" })).toBe(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 });

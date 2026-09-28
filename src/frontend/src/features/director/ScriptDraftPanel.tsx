@@ -62,7 +62,7 @@ export function ScriptDraftPanel({
           type="button"
           className="script-draft-toggle"
           aria-expanded={expanded}
-          aria-label={expanded ? "Hide screenplay" : "Show screenplay"}
+          aria-label="Toggle screenplay"
           onClick={() => setExpanded((open) => !open)}
         >
           <span className="muted tiny">{statusLabel}</span>
