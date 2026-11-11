@@ -21,9 +21,16 @@ router = APIRouter(tags=["h3_ref2va"])
 
 
 def _to_response(job) -> H3Ref2VaJobResponse:
-    pipe = get_pipeline("h3_ref2va")
+    pipe = get_pipeline(job.pipeline_id)
     job = enrich_job_urls(job, labels=pipe.output_labels)
     return H3Ref2VaJobResponse.from_job(job)
+
+
+def _video_job(job_id: str):
+    job = load_job(job_id)
+    if not job or job.pipeline_id not in {"h3_ref2va", "wan_i2v"}:
+        return None
+    return job
 
 
 @router.get("/h3-ref2va/provider")
@@ -31,17 +38,21 @@ async def get_h3_provider_status() -> dict[str, object]:
     default_provider = str(settings.h3_provider or "local").strip().lower()
     if default_provider not in {"local", "minimax"}:
         default_provider = "local"
+    backend = str(settings.video_backend or "h3").strip().lower()
+    if backend not in {"h3", "wan"}:
+        backend = "h3"
     return {
         "default_provider": default_provider,
         "minimax_configured": bool(str(settings.h3_minimax_api_key or "").strip()),
         "minimax_resolution": str(settings.h3_minimax_resolution or "768P"),
+        "video_backend": backend,
     }
 
 
 @router.get("/h3-ref2va/jobs/{job_id}", response_model=H3Ref2VaJobResponse)
 async def get_h3_job(job_id: str) -> H3Ref2VaJobResponse:
-    job = load_job(job_id)
-    if not job or job.pipeline_id != "h3_ref2va":
+    job = _video_job(job_id)
+    if not job:
         raise HTTPException(404, "Job not found")
     return _to_response(job)
 
@@ -76,8 +87,8 @@ async def list_h3_jobs(
 
 @router.post("/h3-ref2va/jobs/{job_id}/cancel", response_model=H3Ref2VaJobResponse)
 async def cancel_h3_job(job_id: str) -> H3Ref2VaJobResponse:
-    job = load_job(job_id)
-    if not job or job.pipeline_id != "h3_ref2va":
+    job = _video_job(job_id)
+    if not job:
         raise HTTPException(404, "Job not found")
     job = await cancel_job(job_id)
     if not job:

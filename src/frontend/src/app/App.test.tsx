@@ -365,9 +365,9 @@ describe("App mode routing", () => {
     expect(header.querySelectorAll(":scope > .topbar-row")).toHaveLength(1);
     expect(header.querySelector(".workflow-nav")).toBeTruthy();
     expect(header.querySelector("[data-testid='project-picker']")).toBeTruthy();
-    expect(screen.queryByText("01")).toBeNull();
-    expect(screen.queryByText("02")).toBeNull();
-    expect(screen.queryByText("03")).toBeNull();
+    const steps = header.querySelectorAll(".workflow-nav .workflow-step");
+    expect(Array.from(steps, (step) => step.textContent)).toEqual(["01", "02", "03"]);
+    expect(Array.from(steps).every((step) => step.getAttribute("aria-hidden") === "true")).toBe(true);
   });
 
   it("uses the Director mark and labels the compact ComfyUI status", async () => {
@@ -441,12 +441,12 @@ describe("App mode routing", () => {
     expect(screen.queryByRole("banner", { name: "Application header" })).toBeNull();
   });
 
-  it("applies the Oat & Walnut workspace theme to desktop and mobile shells", () => {
+  it("applies the night cutting room theme to desktop and mobile shells", () => {
     const { container, rerender } = render(<App />);
-    expect(container.querySelector(".app")?.getAttribute("data-theme")).toBe("oat-walnut");
+    expect(container.querySelector(".app")?.getAttribute("data-theme")).toBe("night-room");
 
     window.history.replaceState({}, "", "/mobile");
     rerender(<App />);
-    expect(container.querySelector(".mobile-app")?.getAttribute("data-theme")).toBe("oat-walnut");
+    expect(container.querySelector(".mobile-app")?.getAttribute("data-theme")).toBe("night-room");
   });
 });

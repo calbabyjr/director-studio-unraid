@@ -694,13 +694,19 @@ export function ProductionPage({
   };
 
   const jobActive = h3Job ? ACTIVE.includes(h3Job.status) : false;
-  // No Gate-2 approve: ready when refs + six-section prompt exist and not mid-run
+  const wanMode = h3ProviderStatus?.video_backend === "wan";
+  // H3 needs refs and a six-section prompt. Wan animates the layout still from the action.
   const canSubmit =
     !!selected &&
     !jobActive &&
     !["queued", "running"].includes(selected.status) &&
-    (selected.refs?.length ?? 0) > 0 &&
-    promptReady(selected.prompt_sections);
+    (wanMode
+      ? Boolean(selected.layout_asset_id) && Boolean(
+          selected.script_beat?.trim()
+          || selected.prompt_sections.detailed_description?.trim()
+          || selected.prompt_sections.summary?.trim(),
+        )
+      : (selected.refs?.length ?? 0) > 0 && promptReady(selected.prompt_sections));
   const layoutUrl = layoutPreviewUrl(selected?.layout_asset_id);
   const voicePromptStale =
     voiceRefsDirty ||
@@ -820,7 +826,7 @@ export function ProductionPage({
         ) : projectLoading ? (
           <p className="mobile-production-empty" role="status">Loading shots…</p>
         ) : projectFailed ? null : shots.length === 0 ? (
-          <p className="mobile-production-empty">No shots yet. Plan them with Director first.</p>
+          <p className="mobile-production-empty">No shots yet. Open Director and plan the shots there.</p>
         ) : (
           <nav className="mobile-production-shot-strip" aria-label="Production shots">
             {shots.map((shot, index) => (
@@ -879,7 +885,7 @@ export function ProductionPage({
                 disabled={busy || !canSubmit || jobActive}
                 onClick={() => void onSubmit()}
               >
-                {jobActive ? "H3 running…" : "Run H3"}
+                {jobActive ? (wanMode ? "Wan running…" : "H3 running…") : (wanMode ? "Run Wan" : "Run H3")}
               </button>
               {takesList}
             </section>
@@ -989,7 +995,9 @@ export function ProductionPage({
       subtitle={
         projectId ? (
           <>
-            Shot list → layout / refs / prompt → Submit H3. Assemble a rough cut when clips are ready.
+            {wanMode
+              ? "Shot list → layout still → Submit Wan. Wan animates that still from the shot action."
+              : "Shot list → layout / refs / prompt → Submit H3. Assemble a rough cut when clips are ready."}
           </>
         ) : (
           "Select a project in the header."
@@ -1019,7 +1027,7 @@ export function ProductionPage({
             ) : projectLoading ? (
               <p className="empty-copy" role="status">Loading shots…</p>
             ) : projectFailed ? null : shots.length === 0 ? (
-              <p className="empty-copy">No shots yet. Plan them in Director first.</p>
+              <p className="empty-copy">No shots yet. Open Director and plan the shots there.</p>
             ) : (
               <div className="shot-table-wrap">
                 <table className="shot-table">
@@ -1375,8 +1383,9 @@ export function ProductionPage({
                     </ol>
                     {!canSubmit && !jobActive ? (
                       <p className="field-hint">
-                        Need at least one ref and a complete prompt (all six sections
-                        non-empty). Save prompt on the Prompt tab first.
+                        {wanMode
+                          ? "Need a layout still and a written shot action before Wan can animate it."
+                          : "Need at least one ref and a complete prompt (all six sections non-empty). Save prompt on the Prompt tab first."}
                       </p>
                     ) : null}
 
@@ -1417,7 +1426,7 @@ export function ProductionPage({
                         disabled={busy || !canSubmit || jobActive}
                         onClick={onSubmit}
                       >
-                        {jobActive ? "H3 running…" : "Submit H3"}
+                        {jobActive ? (wanMode ? "Wan running…" : "H3 running…") : (wanMode ? "Submit Wan" : "Submit H3")}
                       </button>
                       {jobActive ? (
                         <button

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Shot } from "../../shared/api/types";
+import { selectLayout } from "./api";
 import { LayoutReferenceList } from "./LayoutReferenceList";
 
 vi.mock("./api", () => ({
@@ -197,11 +198,44 @@ describe("LayoutReferenceList", () => {
 
     expect(screen.getByText("before entry")).toBeTruthy();
     expect(screen.getByText("post-entry blocking")).toBeTruthy();
-    expect(screen.getAllByText("Used automatically in prompt and H3")).toHaveLength(1);
-    expect(screen.getByText("Previous Layout — not submitted")).toBeTruthy();
+    expect(screen.getByText("Shot is based on this study")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Base shot on post-entry blocking" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Base shot on before entry" })).toBeNull();
     expect(screen.queryByText("Selected for H3")).toBeNull();
     expect(screen.queryByText("Not selected for H3")).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("bases the shot on the chosen study", async () => {
+    const onShotUpdated = vi.fn();
+    const chosen = {
+      ...baseShot,
+      layout_asset_id: "lay_after",
+      layout_refs: baseShot.layout_refs!.map((layout) => ({
+        ...layout,
+        selected_for_h3: layout.id === "lr_after",
+      })),
+    };
+    vi.mocked(selectLayout).mockResolvedValue(chosen);
+    render(
+      <LayoutReferenceList
+        shot={baseShot}
+        busy={false}
+        onDiscussAddReference={vi.fn()}
+        onOpenImage={vi.fn()}
+        onShotUpdated={onShotUpdated}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Base shot on post-entry blocking" }));
+
+    await waitFor(() => expect(selectLayout).toHaveBeenCalledWith(
+      "sht_layouts",
+      "lr_after",
+      true,
+      { exclusive: true },
+    ));
+    expect(onShotUpdated).toHaveBeenCalledWith(chosen);
   });
 
   it("uses the synchronized Shot ref for the Picture badge", () => {

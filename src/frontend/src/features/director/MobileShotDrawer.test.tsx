@@ -9,6 +9,7 @@ const refreshShotPromptMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./api", () => ({
   refreshShotPrompt: refreshShotPromptMock,
+  selectLayout: vi.fn(),
 }));
 
 const shots: Shot[] = ["Arrival", "Reveal"].map((title, index) => ({

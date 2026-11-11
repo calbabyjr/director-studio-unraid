@@ -1,0 +1,52 @@
+# Wan-Director-Studio
+#
+# Same app as Director Studio, with video submit pointed at local Wan 2.2.
+# The layout still is the opening frame. The shot action is the motion prompt.
+# Weights are the uncensored Remix I2V pair and NSFW UMT5 encoder already in
+# ComfyUI-Nvidia-Docker. This container does not start ComfyUI or use a GPU
+# until a clip is submitted to the ComfyUI container on port 8188.
+#
+# Stop Director-Studio before starting this one so the two apps do not both
+# queue ComfyUI jobs or both bind the harness port.
+#
+#   docker compose -f docker-compose.wan.yml up -d
+#   docker stop Wan-Director-Studio
+#
+# UI: http://TOWER_IP:8792
+# Do not `docker compose up` the main compose file.
+
+name: wan-director-studio
+
+services:
+  wan-director-studio:
+    image: director-studio:latest
+    container_name: Wan-Director-Studio
+    network_mode: host
+    restart: "no"
+    environment:
+      TZ: America/Los_Angeles
+      DS_HOST: "0.0.0.0"
+      DS_PORT: "8792"
+      DS_DATA_DIR: /data
+      DS_COMFY_BASE_URL: http://127.0.0.1:8188
+      DS_OLLAMA_BASE_URL: http://127.0.0.1:11434
+      DS_LLM_PROVIDER: ollama
+      DS_DIRECTOR_AGENT_RUNTIME: harness
+      DS_DIRECTOR_VISION_MODEL: fable27b-vl:latest
+      DS_DIRECTOR_NUM_CTX: "49152"
+      DS_DIRECTOR_MAX_TOOL_TURNS: "32"
+      DS_LLM_KEEP_LOADED: "true"
+      DS_VRAM_POLICY: shared
+      DS_H3_PROVIDER: local
+      DS_VIDEO_BACKEND: wan
+      DS_QWEN_EDIT_EXTRA_LORA: qwen-image-edit-2511-nsfw-mcnl-v1.safetensors
+      DS_QWEN_EDIT_EXTRA_LORA_STRENGTH: "0.9"
+      DS_WAN_HIGH_UNET: Wan2.2_Remix_NSFW_i2v_14b_high_lighting_fp8_e4m3fn_v3.0.safetensors
+      DS_WAN_LOW_UNET: Wan2.2_Remix_NSFW_i2v_14b_low_lighting_fp8_e4m3fn_v3.0.safetensors
+      DS_WAN_CLIP: nsfw_wan_umt5-xxl_fp8_scaled.safetensors
+      DS_WAN_VAE: wan_2.1_vae.safetensors
+    volumes:
+      - /mnt/ai/appdata-ai/director-studio/data:/data
+      - /mnt/ai/appdata-ai/director-studio/src/backend/app:/app/backend/app
+      - /mnt/ai/appdata-ai/director-studio/src/backend/workflows:/app/backend/workflows
+      - /mnt/ai/appdata-ai/director-studio/src/frontend/dist:/app/frontend/dist:ro

@@ -44,7 +44,7 @@ function MobileAppShell() {
   return (
     <div
       className={jsonProductionMode ? "mobile-app json-production-mobile-app" : "mobile-app"}
-      data-theme="oat-walnut"
+      data-theme="night-room"
     >
       <header className="mobile-topbar" aria-label="Mobile application header">
         <div className="mobile-topbar-row mobile-topbar-primary">
@@ -70,30 +70,23 @@ function MobileAppShell() {
         </div>
 
         {!jsonProductionMode ? <nav className="mobile-topbar-row mobile-workspace-nav" aria-label="Mobile workspace">
-          <button
-            type="button"
-            className={activePage === "director" ? "active" : ""}
-            aria-current={activePage === "director" ? "page" : undefined}
-            onClick={() => setPage("director")}
-          >
-            Director
-          </button>
-          <button
-            type="button"
-            className={activePage === "asset" ? "active" : ""}
-            aria-current={activePage === "asset" ? "page" : undefined}
-            onClick={() => setPage("asset")}
-          >
-            Assets
-          </button>
-          <button
-            type="button"
-            className={activePage === "production" ? "active" : ""}
-            aria-current={activePage === "production" ? "page" : undefined}
-            onClick={() => setPage("production")}
-          >
-            Production
-          </button>
+          {NAV_ITEMS.map((item) => {
+            const mobileId = item.id === "assets" ? "asset" : item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={activePage === mobileId ? "active" : ""}
+                aria-label={item.label}
+                aria-current={activePage === mobileId ? "page" : undefined}
+                title={item.hint}
+                onClick={() => setPage(mobileId)}
+              >
+                <span className="workflow-step" aria-hidden="true">{item.step}</span>
+                <span className="workflow-label">{item.label}</span>
+              </button>
+            );
+          })}
         </nav> : null}
         <ActivityMeter />
       </header>
@@ -177,7 +170,7 @@ function AppShell() {
       className={`app${activePage === "director" ? " director-page-active" : ""}${
         jsonProductionMode ? " json-production-app" : ""
       }`}
-      data-theme="oat-walnut"
+      data-theme="night-room"
     >
       <header className="topbar" aria-label="Application header">
         <div className="topbar-row">
@@ -208,30 +201,38 @@ function AppShell() {
                 className={activePage === item.id ? "active" : ""}
                 aria-label={item.label}
                 aria-current={activePage === item.id ? "page" : undefined}
+                title={item.hint}
                 onClick={() => setPage(item.id)}
               >
-                {item.label}
+                <span className="workflow-step" aria-hidden="true">{item.step}</span>
+                <span className="workflow-label">{item.label}</span>
               </button>
             ))}
           </nav> : null}
 
           <div
-            className={`health ${health?.comfy_reachable ? "ok" : "bad"}`}
-            aria-label={`ComfyUI ${health?.comfy_reachable ? "online" : "offline"}`}
-            title={`ComfyUI ${health?.comfy_reachable ? "online" : "offline"}`}
+            className={`health ${health == null ? "" : health.comfy_reachable ? "ok" : "bad"}`}
+            aria-label={`ComfyUI ${health == null ? "checking" : health.comfy_reachable ? "online" : "offline"}`}
+            title={`ComfyUI ${health == null ? "checking" : health.comfy_reachable ? "online" : "offline"}`}
           >
             <span className="dot" />
             <span className="health-label">ComfyUI</span>
+            <span className="health-state">
+              {health == null ? "Checking" : health.comfy_reachable ? "Online" : "Offline"}
+            </span>
           </div>
-          <button
-            type="button"
-            className="btn secondary topbar-settings"
-            aria-current={activePage === "director-setup" ? "page" : undefined}
-            onClick={openDirectorSetup}
-          >
-            Director setup
-          </button>
-          <button type="button" className="btn secondary topbar-settings" aria-current={activePage === "settings" ? "page" : undefined} onClick={openSettings}>Settings</button>
+          <div className="studio-utilities">
+            <span className="studio-utilities-label" aria-hidden="true">Studio</span>
+            <button
+              type="button"
+              className="btn secondary topbar-settings"
+              aria-current={activePage === "director-setup" ? "page" : undefined}
+              onClick={openDirectorSetup}
+            >
+              Director setup
+            </button>
+            <button type="button" className="btn secondary topbar-settings" aria-current={activePage === "settings" ? "page" : undefined} onClick={openSettings}>Settings</button>
+          </div>
         </div>
         <ActivityMeter />
       </header>

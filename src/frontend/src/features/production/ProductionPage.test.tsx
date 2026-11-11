@@ -174,7 +174,7 @@ describe("ProductionPage prompt refresh", () => {
     expect(screen.getByText("Loading…")).toBeTruthy();
     expect(screen.getByText("Loading shots…")).toBeTruthy();
     expect(screen.queryByText("0 shots")).toBeNull();
-    expect(screen.queryByText("No shots yet. Plan them with Director first.")).toBeNull();
+    expect(screen.queryByText("No shots yet. Open Director and plan the shots there.")).toBeNull();
 
     await act(async () => resolveProject(detail(shot(emptyPrompt))));
     expect(await screen.findByText("1 shots")).toBeTruthy();

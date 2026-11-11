@@ -37,11 +37,11 @@ describe("error-state colors", () => {
     ".btn.danger",
     ".mode-chip.danger",
     ".gate-badge.bad",
-  ])("uses readable dark text for %s on the light theme", (selector) => {
+  ])("uses the danger token for %s", (selector) => {
     expect(resolvedGlobalProperty(selector, "color")).toBe("var(--danger)");
   });
 
-  it("keeps danger text at WCAG AA contrast against the light panel", () => {
+  it("keeps danger text at WCAG AA contrast against the panel", () => {
     const danger = resolvedGlobalProperty(":root", "--danger");
     const panel = resolvedGlobalProperty(":root", "--bg-panel");
 

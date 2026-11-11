@@ -14,7 +14,7 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-it("renders Director errors with readable dark-red text on the light canvas", () => {
+it("renders Director errors with readable danger text on the dark panel", () => {
   const style = document.createElement("style");
   style.textContent = styles;
   document.head.append(style);
@@ -28,8 +28,8 @@ it("renders Director errors with readable dark-red text on the light canvas", ()
   app.append(banner, status);
   document.body.append(app);
 
-  expect(getComputedStyle(banner).color).toBe("rgb(116, 58, 52)");
-  expect(getComputedStyle(status).color).toBe("rgb(116, 58, 52)");
+  expect(getComputedStyle(banner).color).toBe("rgb(224, 122, 114)");
+  expect(getComputedStyle(status).color).toBe("rgb(224, 122, 114)");
 });
 
 it("renders the clapperboard frame with muted, side-first stripe layers", () => {
@@ -45,8 +45,8 @@ it("renders the clapperboard frame with muted, side-first stripe layers", () => 
   );
   const background = rule?.style.background ?? "";
   expect(background.match(/repeating-linear-gradient/g)).toHaveLength(3);
-  expect(background).toContain("#5b524a");
-  expect(background).toContain("#d8cfc3");
+  expect(background).toContain("#1c1915");
+  expect(background).toContain("#f4efe6");
   expect(background).toContain(
     "right / calc(var(--shot-document-gutter) + 15px) 100% no-repeat",
   );

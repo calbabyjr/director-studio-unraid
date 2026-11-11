@@ -5,6 +5,7 @@ from . import ref_frame as _ref_frame  # noqa: F401
 from . import gpt_ref_frame as _gpt_ref_frame  # noqa: F401
 from . import gpt_actor as _gpt_actor  # noqa: F401
 from . import h3_ref2va as _h3_ref2va  # noqa: F401
+from . import wan_i2v as _wan_i2v  # noqa: F401
 from . import prop as _prop  # noqa: F401
 from . import costume as _costume  # noqa: F401
 from . import moge_plate as _moge_plate  # noqa: F401

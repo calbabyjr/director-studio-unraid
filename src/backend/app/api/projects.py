@@ -37,6 +37,7 @@ from ..core.h3.submit import (
     submit_h3_shot,
     validate_voice_refs,
 )
+from ..core.wan.submit import submit_wan_shot
 from ..core.jobs import start_pipeline_job
 from ..core.library.store import (
     asset_dir,
@@ -224,6 +225,7 @@ class ReviewLayoutReferenceBody(BaseModel):
 
 class SelectLayoutReferenceBody(BaseModel):
     selected_for_h3: bool
+    exclusive: bool = False
 
 
 class ApproveLayoutBody(BaseModel):
@@ -1417,6 +1419,7 @@ async def select_layout_reference_endpoint(
             shot,
             layout_ref_id,
             body.selected_for_h3,
+            exclusive=body.exclusive,
         )
         updated = sync_selected_layout_refs(updated)
     except ValueError as exc:
@@ -1880,6 +1883,13 @@ async def submit_shot_endpoint(
     the Director Agent before preflight. Matching prompts do not wake the LLM.
     """
     shot = _find_shot(shot_id)
+    if str(settings.video_backend or "h3").strip().lower() == "wan":
+        try:
+            return await submit_wan_shot(shot)
+        except H3SubmitError as exc:
+            raise HTTPException(exc.status_code, detail=exc.detail) from exc
+        except ValueError as exc:
+            raise _http_value_error(exc) from exc
     try:
         return await submit_h3_shot(
             shot,

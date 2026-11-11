@@ -129,7 +129,7 @@ export function ShotWorkspace({
       </header>
 
       {shots.length === 0 ? (
-        <p className="empty-copy">No shots yet. Ask the Director to plan them in chat.</p>
+        <p className="empty-copy">No shots yet. Describe the scene in the Director message box on the left.</p>
       ) : selected ? (
         <div className="shot-workspace-body">
           <nav className="shot-bookmarks" aria-label="Shots">
@@ -258,6 +258,7 @@ export function ShotWorkspace({
                     <LayoutReferenceList
                       shot={selected}
                       busy={busy}
+                      onShotUpdated={onShotUpdated}
                       onDiscussAddReference={(description) => {
                         const ids = selected.layout_refs.map((layout) => layout.id).join(", ") || "none";
                         onSend(

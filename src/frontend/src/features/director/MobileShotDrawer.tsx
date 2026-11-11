@@ -6,8 +6,9 @@ import {
   type Shot,
   type ShotRef,
 } from "../../shared/api/types";
-import { isDisplayableLayout, isRetiredLayout } from "../../shared/layoutReferenceStatus";
+import { canBaseShotOn, isDisplayableLayout, isRetiredLayout, isShotBasis } from "../../shared/layoutReferenceStatus";
 import { firstActionableShotId, shotWorkflowStatus } from "../../shared/shotWorkflowStatus";
+import { selectLayout } from "./api";
 import { REFRESH_PROMPT_BUSY_LABEL, useShotPromptRefresh } from "./useShotPromptRefresh";
 
 function referenceLabel(role: string) {
@@ -34,13 +35,43 @@ function MobileReferenceThumb({ refItem, onOpen }: { refItem: ShotRef; onOpen: (
   );
 }
 
-function MobileLayoutCard({ layout, onOpen }: { layout: LayoutReference; onOpen: (url: string) => void }) {
+function MobileLayoutCard({
+  shot,
+  layout,
+  onOpen,
+  onShotUpdated,
+}: {
+  shot: Shot;
+  layout: LayoutReference;
+  onOpen: (url: string) => void;
+  onShotUpdated?: (shot: Shot) => void;
+}) {
+  const [choosing, setChoosing] = useState(false);
   const url = layout.asset_id ? layoutPreviewUrl(layout.asset_id) : null;
+  const basis = isShotBasis(shot, layout);
+  const choosable = !basis && canBaseShotOn(layout);
   return (
     <article>
       {url ? <button type="button" onClick={() => onOpen(url)}><img src={url} alt={layout.purpose} /></button> : null}
       <strong>{layout.purpose}</strong>
       <small>{layout.superseded_by ? "previous" : layout.review_status?.replaceAll("_", " ") || "Awaiting review"}</small>
+      {basis ? <small>Shot is based on this study</small> : null}
+      {choosable ? (
+        <button
+          type="button"
+          className="layout-basis-button"
+          disabled={choosing}
+          aria-label={`Base shot on ${layout.purpose || "this study"}`}
+          onClick={() => {
+            setChoosing(true);
+            void selectLayout(shot.id, layout.id, true, { exclusive: true })
+              .then((updated) => onShotUpdated?.(updated))
+              .finally(() => setChoosing(false));
+          }}
+        >
+          Base shot on this
+        </button>
+      ) : null}
     </article>
   );
 }
@@ -210,7 +241,15 @@ export function MobileShotDrawer({
                   <div className="mobile-layout-strip">
                     {displayableLayouts
                       .filter((layout) => layout.asset_id && !isRetiredLayout(layout))
-                      .map((layout) => <MobileLayoutCard key={layout.id} layout={layout} onOpen={onOpenImage} />)}
+                      .map((layout) => (
+                        <MobileLayoutCard
+                          key={layout.id}
+                          shot={selected}
+                          layout={layout}
+                          onOpen={onOpenImage}
+                          onShotUpdated={onShotUpdated}
+                        />
+                      ))}
                     {!displayableLayouts.some((layout) => layout.asset_id) && selected.layout_asset_id ? (
                       <article>
                         <button type="button" onClick={() => onOpenImage(layoutPreviewUrl(selected.layout_asset_id!)!)}>
@@ -231,7 +270,15 @@ export function MobileShotDrawer({
                       <div className="mobile-layout-strip">
                         {displayableLayouts
                           .filter((layout) => layout.asset_id && isRetiredLayout(layout))
-                          .map((layout) => <MobileLayoutCard key={layout.id} layout={layout} onOpen={onOpenImage} />)}
+                          .map((layout) => (
+                            <MobileLayoutCard
+                              key={layout.id}
+                              shot={selected}
+                              layout={layout}
+                              onOpen={onOpenImage}
+                              onShotUpdated={onShotUpdated}
+                            />
+                          ))}
                       </div>
                     </details>
                   ) : null}

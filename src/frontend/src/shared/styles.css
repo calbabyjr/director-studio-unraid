@@ -1,22 +1,22 @@
 :root {
-  --bg: #cfc6b9;
-  --bg-elev: #ddd4c7;
-  --bg-panel: #e7ded2;
-  --panel: #e7ded2;
-  --border: #b8aa9b;
-  --border-strong: #938170;
-  --text: #342c27;
-  --muted: #5c5149;
-  --accent: #7c472f;
-  --accent-dim: #693b28;
-  --accent-soft: #dbc4b3;
-  --ok: #667f62;
-  --danger: #743a34;
-  --info: #806c5f;
+  --bg: #12161c;
+  --bg-elev: #1b212b;
+  --bg-panel: #222a36;
+  --panel: #222a36;
+  --border: #343d4c;
+  --border-strong: #4e5b6e;
+  --text: #f4efe6;
+  --muted: #a8b1bf;
+  --accent: #e8a15a;
+  --accent-dim: #c4843d;
+  --accent-soft: #3d2e1c;
+  --ok: #8fd0a8;
+  --danger: #e07a72;
+  --info: #9ec0dc;
   --radius: 12px;
   --font: "DM Sans", system-ui, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, monospace;
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 /* Workflow setup shares the production workbench surfaces and binding typography. */
@@ -83,8 +83,7 @@ body,
 body {
   font-family: var(--font);
   background:
-    radial-gradient(1200px 600px at 10% -10%, #e5dccf 0%, transparent 58%),
-    radial-gradient(900px 500px at 100% 0%, #c3b3a3 0%, transparent 52%),
+    radial-gradient(1200px 600px at 10% -10%, rgba(232, 161, 90, 0.08) 0%, transparent 58%),
     var(--bg);
   color: var(--text);
 }
@@ -133,7 +132,7 @@ code {
   flex-direction: column;
   gap: 0;
   border-bottom: 1px solid var(--border);
-  background: rgba(221, 212, 199, 0.94);
+  background: rgba(18, 22, 28, 0.94);
   backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
@@ -349,7 +348,7 @@ code {
   border: 1px solid currentColor;
   border-radius: 999px;
   background: transparent;
-  color: var(--accent, #725344);
+  color: var(--accent, #e8a15a);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -573,7 +572,7 @@ code {
   margin-left: auto;
   padding: 0.18rem 0.55rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 18%, #fff);
+  background: var(--accent-soft);
   color: var(--accent);
   font-size: 0.72rem;
   font-weight: 700;
@@ -1147,7 +1146,12 @@ code {
   flex: 1 1 150px;
 }
 
+.layout-basis-button {
+  margin-left: auto;
+}
+
 .layout-selection-summary {
+  margin-left: auto;
   color: var(--text);
   font-family: var(--mono);
   font-size: 0.66rem;
@@ -1493,7 +1497,7 @@ code {
   border-radius: 9px;
   display: grid;
   place-items: center;
-  background: #eef0ff;
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -1571,8 +1575,21 @@ code {
   flex-shrink: 0;
 }
 
-.health-label {
+.health-label,
+.health-state {
   white-space: nowrap;
+}
+
+.health-state {
+  font-weight: 650;
+}
+
+.health.ok .health-state {
+  color: var(--ok);
+}
+
+.health.bad .health-state {
+  color: var(--danger);
 }
 
 /* —— Page shell / split layouts —— */
@@ -2371,15 +2388,15 @@ h2 {
 }
 
 .director-shots-panel .banner.error {
-  background: color-mix(in srgb, var(--danger) 10%, #f0e8dc);
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-panel));
   border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
-  color: #743a34;
+  color: #e07a72;
 }
 
 .director-shots-panel .status-chip.status-failed,
 .director-shots-panel .status-chip.status-blocked {
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
-  color: #743a34;
+  color: #e07a72;
 }
 
 .banner.ok {
@@ -3626,13 +3643,31 @@ select {
 }
 
 .mobile-workspace-nav button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.22rem;
+  min-width: 0;
   min-height: 2.2rem;
+  padding: 0.2rem 0.28rem;
+  overflow: hidden;
   border: 0;
   border-radius: 0.58rem;
   background: transparent;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.7rem;
   font-weight: 680;
+  white-space: nowrap;
+}
+
+.mobile-workspace-nav .workflow-step {
+  font-size: 0.62rem;
+}
+
+.mobile-workspace-nav .workflow-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mobile-workspace-nav button.active {
@@ -4562,6 +4597,20 @@ select {
 }
 
 .mobile-shot-document {
+  --text: #1c1915;
+  --muted: #5c5149;
+  --accent: #7c472f;
+  --accent-dim: #693b28;
+  --accent-soft: #e4d3c0;
+  --ok: #1f6b45;
+  --danger: #8d3a34;
+  --info: #2a5278;
+  --border: #c9bbaa;
+  --border-strong: #a89480;
+  --bg: #f0e8dc;
+  --bg-elev: #e6dccf;
+  --bg-panel: #f4ece3;
+  --panel: #f4ece3;
   max-height: min(52vh, 32rem);
   overflow-y: auto;
   border: 1px solid var(--border);
@@ -4643,7 +4692,7 @@ select {
 }
 
 .mobile-reference-thumb button,
-.mobile-layout-strip article > button {
+.mobile-layout-strip article > button:not(.layout-basis-button) {
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -4657,6 +4706,17 @@ select {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.mobile-layout-strip .layout-basis-button {
+  padding: 0.28rem 0.4rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.62rem;
+  line-height: 1.2;
+  white-space: normal;
 }
 
 .mobile-reference-thumb small,
@@ -5728,33 +5788,33 @@ select {
   }
 }
 
-/* Oat & Walnut: a quiet, warm production desk shared by the workspace surfaces. */
+/* Night cutting room: dark ink surfaces, warm paper text, one tungsten accent. */
 .app {
-  --bg: #cfc6b9;
-  --bg-elev: #ddd4c7;
-  --bg-panel: #e7ded2;
-  --panel: #e7ded2;
-  --border: #b8aa9b;
-  --border-strong: #938170;
-  --text: #342c27;
-  --muted: #5c5149;
-  --accent: #7c472f;
-  --accent-dim: #693b28;
-  --accent-soft: #dbc4b3;
-  --ok: #667f62;
-  --danger: #743a34;
-  --info: #806c5f;
+  --bg: #12161c;
+  --bg-elev: #1b212b;
+  --bg-panel: #222a36;
+  --panel: #222a36;
+  --border: #343d4c;
+  --border-strong: #4e5b6e;
+  --text: #f4efe6;
+  --muted: #a8b1bf;
+  --accent: #e8a15a;
+  --accent-dim: #c4843d;
+  --accent-soft: #3d2e1c;
+  --ok: #8fd0a8;
+  --danger: #e07a72;
+  --info: #9ec0dc;
   --radius: 10px;
   --font: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  color-scheme: light;
+  color-scheme: dark;
   background: var(--bg);
   color: var(--text);
 }
 
 .app .topbar {
   position: sticky;
-  background: rgba(221, 212, 199, 0.96);
-  box-shadow: 0 1px 0 rgba(52, 44, 39, 0.05);
+  background: rgba(18, 22, 28, 0.94);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
 }
 
 .app.json-production-app {
@@ -5867,6 +5927,24 @@ select {
   font-weight: 600;
 }
 
+.studio-utilities {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 0.4rem;
+  margin-left: 0.15rem;
+  padding-left: 0.7rem;
+  border-left: 1px solid var(--border);
+}
+
+.studio-utilities-label {
+  color: var(--muted);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .workflow-nav {
   display: flex;
   align-items: center;
@@ -5879,21 +5957,31 @@ select {
   background: var(--bg);
 }
 
+.workflow-step {
+  flex: none;
+  font-family: Bahnschrift, "Segoe UI", sans-serif;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
 .workflow-nav button {
   display: flex;
   align-items: center;
-  padding: 0.4rem 0.85rem;
+  gap: 0.38rem;
+  padding: 0.4rem 0.75rem;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .workflow-nav button.active {
   background: var(--accent-soft);
   color: var(--accent);
-  box-shadow: 0 1px 2px rgba(52, 44, 39, 0.12);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 .workspace-kicker {
@@ -6134,19 +6222,19 @@ select {
 .app .production-page .banner.error {
   background: color-mix(in srgb, var(--danger) 12%, var(--bg-panel));
   border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  color: #743a34;
+  color: #e07a72;
 }
 
 .app .production-page .status-chip.status-approved,
 .app .production-page .status-chip.status-succeeded {
   border-color: color-mix(in srgb, var(--ok) 55%, var(--border));
-  color: #4d674a;
+  color: var(--ok);
 }
 
 .app .production-page .status-chip.status-failed,
 .app .production-page .status-chip.status-blocked {
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
-  color: #743a34;
+  color: #e07a72;
 }
 
 .production-submit-actions {
@@ -6161,7 +6249,7 @@ select {
 .app .production-page .production-submit-actions .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff8ef;
+  color: #1a1208;
 }
 
 .app .section-card,
@@ -6263,7 +6351,7 @@ select {
   max-height: none;
   border-radius: 12px;
   background: var(--bg-panel);
-  box-shadow: 0 1px 2px rgba(52, 44, 39, 0.06);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 .director-chat-panel {
@@ -6312,7 +6400,7 @@ select {
   border-radius: 999px;
   background: var(--bg-panel);
   color: var(--text);
-  box-shadow: 0 2px 8px rgba(52, 44, 39, 0.18);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
   cursor: pointer;
 }
 
@@ -6370,7 +6458,7 @@ select {
   padding: 0.35rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--panel, #f7f1e9) 88%, transparent);
+  background: color-mix(in srgb, var(--panel, #222a36) 88%, transparent);
 }
 
 .director-memory:not([open]) {
@@ -6796,23 +6884,59 @@ select {
 
 .shot-detail-panel-clapperboard {
   background:
-    repeating-linear-gradient(135deg, #5b524a 0 10px, #d8cfc3 10px 20px)
+    repeating-linear-gradient(135deg, #1c1915 0 10px, #f4efe6 10px 20px)
       left / var(--shot-document-gutter) 100% no-repeat,
-    repeating-linear-gradient(135deg, #5b524a 0 10px, #d8cfc3 10px 20px)
+    repeating-linear-gradient(135deg, #1c1915 0 10px, #f4efe6 10px 20px)
       right / calc(var(--shot-document-gutter) + 15px) 100% no-repeat,
-    repeating-linear-gradient(135deg, #5b524a 0 10px, #d8cfc3 10px 20px)
+    repeating-linear-gradient(135deg, #1c1915 0 10px, #f4efe6 10px 20px)
       top / 100% var(--shot-document-gutter) no-repeat,
     color-mix(in srgb, var(--bg) 58%, var(--bg-elev));
 }
 
 .shot-document {
+  --text: #1c1915;
+  --muted: #5c5149;
+  --accent: #7c472f;
+  --accent-dim: #693b28;
+  --accent-soft: #e4d3c0;
+  --ok: #1f6b45;
+  --danger: #8d3a34;
+  --info: #2a5278;
+  --border: #c9bbaa;
+  --border-strong: #a89480;
+  --bg: #f0e8dc;
+  --bg-elev: #e6dccf;
+  --bg-panel: #f4ece3;
+  --panel: #f4ece3;
   width: min(100%, 920px);
   margin: 0 auto;
   border: 1px solid color-mix(in srgb, var(--border-strong) 70%, var(--border));
   border-radius: 3px;
   background: #f0e8dc;
-  box-shadow: 0 14px 30px rgba(72, 56, 44, 0.12);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
+  color: var(--text);
   overflow: hidden;
+}
+
+.shot-document .banner.error,
+.mobile-shot-document .banner.error {
+  background: color-mix(in srgb, var(--danger) 12%, #f0e8dc);
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+  color: var(--danger);
+}
+
+.shot-document .status-chip.status-failed,
+.shot-document .status-chip.status-blocked,
+.shot-document .status-chip.status-h3-failed,
+.mobile-shot-document .status-chip.status-failed,
+.mobile-shot-document .status-chip.status-blocked,
+.mobile-shot-document .status-chip.status-h3-failed {
+  color: var(--danger);
+}
+
+.shot-document .mode-chip.selected,
+.mobile-shot-document .mode-chip.selected {
+  color: var(--accent);
 }
 
 .shot-document-meta {
@@ -6918,7 +7042,7 @@ select {
   display: grid;
   place-items: center;
   padding: clamp(0.65rem, 2vw, 1.5rem);
-  background: rgba(42, 34, 29, 0.62);
+  background: rgba(8, 10, 14, 0.72);
   backdrop-filter: blur(7px);
 }
 
@@ -6930,8 +7054,8 @@ select {
   overflow: hidden;
   border: 1px solid var(--border-strong);
   border-radius: 5px;
-  background: #eee5d8;
-  box-shadow: 0 30px 90px rgba(43, 32, 25, 0.34);
+  background: var(--bg-panel);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
 }
 
 .shot-material-editor-header {
@@ -6942,8 +7066,8 @@ select {
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--border-strong);
   background:
-    linear-gradient(90deg, rgba(124, 71, 47, 0.12), transparent 42%),
-    color-mix(in srgb, var(--bg-elev) 82%, #eee5d8);
+    linear-gradient(90deg, rgba(232, 161, 90, 0.12), transparent 42%),
+    var(--bg-elev);
 }
 
 .shot-material-editor-header span,
@@ -7003,8 +7127,8 @@ select {
   padding: clamp(1.25rem, 4vw, 2.75rem);
   overflow-y: auto;
   background:
-    linear-gradient(135deg, rgba(124, 71, 47, 0.08), transparent 45%),
-    color-mix(in srgb, var(--bg-panel) 72%, #f5eee4);
+    linear-gradient(135deg, rgba(232, 161, 90, 0.08), transparent 45%),
+    var(--bg-panel);
 }
 
 .shot-material-save-review > div:first-child {
@@ -7029,7 +7153,7 @@ select {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0;
   border: 1px solid var(--border);
-  background: #f6efe5;
+  background: var(--bg-elev);
 }
 
 .shot-material-save-review dl > div {
@@ -7068,7 +7192,7 @@ select {
   resize: vertical;
   border: 1px solid var(--border-strong);
   border-radius: 4px;
-  background: #fffaf2;
+  background: var(--bg);
   color: var(--text);
   line-height: 1.55;
 }
@@ -7104,7 +7228,7 @@ select {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: #f6efe5;
+  background: var(--bg-elev);
 }
 
 .shot-material-selected-preview,
@@ -7123,7 +7247,7 @@ select {
 }
 
 .shot-material-preview-empty {
-  background: color-mix(in srgb, var(--bg) 75%, #41362f);
+  background: var(--bg);
 }
 
 .shot-material-preview-button {
@@ -7212,7 +7336,7 @@ select {
   overflow-y: auto;
   padding: 0.95rem 1.25rem 1.25rem;
   border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-panel) 68%, #f5eee4);
+  background: var(--bg);
 }
 
 .shot-material-library-heading {
@@ -7251,7 +7375,7 @@ select {
 .shot-material-library-filters button[aria-pressed="true"] {
   border-color: var(--accent);
   background: var(--accent);
-  color: #fff8ee;
+  color: #1a1208;
 }
 
 .shot-material-library-grid {
@@ -7308,7 +7432,7 @@ select {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: #f5eee4;
+  background: var(--bg-elev);
 }
 
 .shot-material-library-grid article.selected {
@@ -7614,7 +7738,8 @@ select {
 .app input,
 .app textarea,
 .app select {
-  background: #f0e8dc;
+  background: var(--bg-panel);
+  color: var(--text);
 }
 
 .app .json-production-page input,

@@ -5,13 +5,15 @@ import {
   type LayoutReviewStatus,
   type Shot,
 } from "../../shared/api/types";
-import { isDisplayableLayout, isRetiredLayout } from "../../shared/layoutReferenceStatus";
+import { canBaseShotOn, isDisplayableLayout, isRetiredLayout, isShotBasis } from "../../shared/layoutReferenceStatus";
+import { selectLayout } from "./api";
 
 interface LayoutReferenceListProps {
   shot: Shot;
   busy: boolean;
   onDiscussAddReference: (description: string) => void;
   onOpenImage: (assetId: string) => void;
+  onShotUpdated?: (shot: Shot) => void;
 }
 
 function isTerminalJobFailure(layout: LayoutReference): boolean {
@@ -39,12 +41,18 @@ function shouldDefaultExpand(layout: LayoutReference): boolean {
 function LayoutReferenceCard({
   shot,
   layout,
+  busy,
   onOpenImage,
+  onShotUpdated,
 }: {
   shot: Shot;
   layout: LayoutReference;
+  busy: boolean;
   onOpenImage: (assetId: string) => void;
+  onShotUpdated?: (shot: Shot) => void;
 }) {
+  const [choosing, setChoosing] = useState(false);
+  const [choiceError, setChoiceError] = useState<string | null>(null);
   const picture = layout.asset_id
     ? shot.refs.find(
         (ref) => ref.role === "layout_ref_frame" && ref.asset_id === layout.asset_id,
@@ -53,6 +61,21 @@ function LayoutReferenceCard({
   const status = layout.review_status;
   const terminalJobFailure = isTerminalJobFailure(layout);
   const imageUrl = layoutPreviewUrl(layout.asset_id);
+  const basis = isShotBasis(shot, layout);
+  const choosable = !basis && canBaseShotOn(layout);
+
+  const choose = async () => {
+    setChoosing(true);
+    setChoiceError(null);
+    try {
+      const updated = await selectLayout(shot.id, layout.id, true, { exclusive: true });
+      onShotUpdated?.(updated);
+    } catch (cause) {
+      setChoiceError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setChoosing(false);
+    }
+  };
 
   return (
     <article className="layout-reference-card" aria-labelledby={`layout-${layout.id}-title`}>
@@ -66,6 +89,23 @@ function LayoutReferenceCard({
             {reviewLabel(status, layout)}
           </span>
           {picture ? <span className="layout-picture-badge">Picture {picture.picture_index}</span> : null}
+          {basis ? (
+            <span className="layout-selection-summary">Shot is based on this study</span>
+          ) : choosable ? (
+            <button
+              type="button"
+              className="mode-chip layout-basis-button"
+              disabled={busy || choosing}
+              aria-label={`Base shot on ${layout.purpose || "this study"}`}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void choose();
+              }}
+            >
+              Base shot on this
+            </button>
+          ) : null}
         </summary>
         <div className="layout-reference-body">
           <div className="layout-reference-rail">
@@ -118,11 +158,8 @@ function LayoutReferenceCard({
             ) : null}
             {status === "reject" ? (
               <span className="layout-selection-hint">This Layout is not used.</span>
-            ) : picture ? (
-              <span className="layout-selection-hint">Used automatically in prompt and H3</span>
-            ) : layout.asset_id ? (
-              <span className="layout-selection-hint">Previous Layout — not submitted</span>
             ) : null}
+            {choiceError ? <p className="layout-action-error" role="alert">{choiceError}</p> : null}
           </div>
         </div>
       </details>
@@ -130,7 +167,7 @@ function LayoutReferenceCard({
   );
 }
 
-export function LayoutReferenceList({ shot, busy, onDiscussAddReference, onOpenImage }: LayoutReferenceListProps) {
+export function LayoutReferenceList({ shot, busy, onDiscussAddReference, onOpenImage, onShotUpdated }: LayoutReferenceListProps) {
   const layouts = shot.layout_refs;
   const displayableLayouts = layouts.filter(isDisplayableLayout);
   const currentLayouts = displayableLayouts.filter((layout) => !isRetiredLayout(layout));
@@ -153,7 +190,9 @@ export function LayoutReferenceList({ shot, busy, onDiscussAddReference, onOpenI
           key={layout.id}
           shot={shot}
           layout={layout}
+          busy={busy}
           onOpenImage={onOpenImage}
+          onShotUpdated={onShotUpdated}
         />
       ))}
       {retiredLayouts.length ? (
@@ -165,7 +204,9 @@ export function LayoutReferenceList({ shot, busy, onDiscussAddReference, onOpenI
                 key={layout.id}
                 shot={shot}
                 layout={layout}
+                busy={busy}
                 onOpenImage={onOpenImage}
+                onShotUpdated={onShotUpdated}
               />
             ))}
           </div>

@@ -40,6 +40,17 @@ class Settings(BaseSettings):
     # the official Comfy MCP transport; ``minimax`` uses the official
     # asynchronous MiniMax H3 V2 API. ``mcp`` remains a legacy alias for local.
     h3_provider: str = "local"
+    # h3 keeps the current Ref2AV submit path. wan submits the layout still
+    # and the shot action to a local Wan 2.2 image-to-video graph.
+    video_backend: Literal["h3", "wan"] = "h3"
+    wan_high_unet: str = (
+        "Wan2.2_Remix_NSFW_i2v_14b_high_lighting_fp8_e4m3fn_v3.0.safetensors"
+    )
+    wan_low_unet: str = (
+        "Wan2.2_Remix_NSFW_i2v_14b_low_lighting_fp8_e4m3fn_v3.0.safetensors"
+    )
+    wan_clip: str = "nsfw_wan_umt5-xxl_fp8_scaled.safetensors"
+    wan_vae: str = "wan_2.1_vae.safetensors"
     comfy_mcp_command: str = "comfy-mcp"
     comfy_mcp_args: str = ""
     comfy_mcp_comfy_bin: str = "comfy"

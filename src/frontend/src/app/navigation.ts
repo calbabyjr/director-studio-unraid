@@ -10,10 +10,12 @@ export interface NavItem {
   id: NavId;
   label: string;
   step: string;
+  /** Tooltip only. Kept out of the accessible name. */
+  hint: string;
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { id: "director", label: "Director", step: "01" },
-  { id: "assets", label: "Assets", step: "02" },
-  { id: "production", label: "Production", step: "03" },
+  { id: "director", label: "Director", step: "01", hint: "Plan the story and the shots" },
+  { id: "assets", label: "Assets", step: "02", hint: "Cast actors, places, props, and voices" },
+  { id: "production", label: "Production", step: "03", hint: "Render the shots" },
 ];

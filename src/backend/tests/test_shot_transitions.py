@@ -68,6 +68,25 @@ def test_reject_one_layout_does_not_change_sibling():
     assert updated.layout_refs[1].selected_for_h3 is False
 
 
+def test_exclusive_choice_bases_the_shot_on_one_pending_study():
+    shot = _shot_with_two_layouts().model_copy(update={"layout_asset_id": "lay_before"})
+
+    chosen = transitions.select_layout_reference(shot, "lr_after", True, exclusive=True)
+
+    assert [layout.selected_for_h3 for layout in chosen.layout_refs] == [False, True]
+    assert chosen.layout_asset_id == "lay_after"
+    assert chosen.layout_refs[1].review_status == LayoutReviewStatus.pending_review
+
+
+def test_pending_layout_cannot_join_the_active_set_without_an_exclusive_choice():
+    shot = _shot_with_two_layouts()
+    pending = shot.layout_refs[1].model_copy(update={"selected_for_h3": False})
+    shot = shot.model_copy(update={"layout_refs": [shot.layout_refs[0], pending]})
+
+    with pytest.raises(ValueError, match="Layout must be usable"):
+        transitions.select_layout_reference(shot, "lr_after", True)
+
+
 def test_rejected_layout_cannot_be_selected():
     shot = _shot_with_two_layouts()
     rejected = shot.layout_refs[1].model_copy(

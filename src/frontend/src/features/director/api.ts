@@ -654,11 +654,15 @@ export async function selectLayout(
   shotId: string,
   layoutRefId: string,
   selectedForH3: boolean,
+  options?: { exclusive?: boolean },
 ): Promise<Shot> {
   const res = await fetch(`/api/shots/${shotId}/layouts/${layoutRefId}/selection`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ selected_for_h3: selectedForH3 }),
+    body: JSON.stringify({
+      selected_for_h3: selectedForH3,
+      exclusive: options?.exclusive ?? false,
+    }),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();

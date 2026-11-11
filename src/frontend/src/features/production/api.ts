@@ -64,6 +64,7 @@ export interface H3ProviderStatus {
   default_provider: H3Provider;
   minimax_configured: boolean;
   minimax_resolution: string;
+  video_backend?: "h3" | "wan";
 }
 
 export async function getH3ProviderStatus(): Promise<H3ProviderStatus> {

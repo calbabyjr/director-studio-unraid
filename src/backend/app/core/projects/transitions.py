@@ -162,12 +162,22 @@ def select_layout_reference(
     shot: Shot,
     layout_ref_id: str,
     selected: bool,
+    *,
+    exclusive: bool = False,
 ) -> Shot:
-    """Add or remove one reviewed LayoutReference from the active H3 set."""
+    """Add or remove one reviewed LayoutReference from the active H3 set.
+
+    ``exclusive`` makes the chosen generated study the only basis for the shot.
+    A pending study can be chosen that way because the person has seen the image.
+    """
     target = _layout_reference(shot, layout_ref_id)
     if selected:
         if target.review_status == LayoutReviewStatus.reject:
             raise ValueError("rejected Layout cannot be selected")
+        if target.superseded_by:
+            raise ValueError("superseded Layout cannot be selected")
+        if exclusive and not target.asset_id:
+            raise ValueError("Layout has no generated image to base the shot on")
         if target.review_status == LayoutReviewStatus.usable_with_repair:
             overrides = dict(
                 (shot.meta or {}).get("layout_human_overrides") or {}
@@ -176,6 +186,9 @@ def select_layout_reference(
                 raise ValueError(
                     "usable_with_repair Layout requires a recorded human override"
                 )
+        elif target.review_status == LayoutReviewStatus.pending_review:
+            if not exclusive:
+                raise ValueError("Layout must be usable before it can be selected")
         elif target.review_status != LayoutReviewStatus.usable:
             raise ValueError("Layout must be usable before it can be selected")
     replacements = [
@@ -183,7 +196,8 @@ def select_layout_reference(
             update={
                 "selected_for_h3": (
                     True if selected and layout.id == target.id else (
-                        False if layout.id == target.id else layout.selected_for_h3
+                        False if layout.id == target.id or (exclusive and selected)
+                        else layout.selected_for_h3
                     )
                 )
             }
